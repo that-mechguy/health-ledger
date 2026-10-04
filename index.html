@@ -957,7 +957,7 @@ $("#hkFile").onchange = async e => {
       let v = parseFloat(attr(a, "value")); if (isNaN(v)) continue; const unit = attr(a, "unit") || "";
       if (t === "BodyMass" && unit === "lb") v *= 0.453592; if (t === "ActiveEnergyBurned" && unit === "kJ") v /= 4.184;
       if (t === "OxygenSaturation" && v <= 1) v *= 100;
-      add(t + "|" + d + "|" + src, v, sd); } };
+      add(t + "|" + d + "|" + src + (t === "StepCount" || t === "ActiveEnergyBurned" ? "|" + sd.slice(11, 13) : ""), v, sd); } };
   try {
     let carry = "";
     const feed = text => { const t = carry + text; const i = t.lastIndexOf(">"); if (i < 0) { carry = t; return; } scan(t.slice(0, i+1)); carry = t.slice(i+1); };
@@ -976,10 +976,12 @@ $("#hkFile").onchange = async e => {
     const days = {};
     const SUM = new Set(["StepCount", "ActiveEnergyBurned", "Sleep"]), LAST = new Set(["BodyMass", "BloodPressureSystolic", "BloodPressureDiastolic"]);
     const byDay = {}; // type|day -> list of per-source aggregates
-    for (const [k, o] of Object.entries(agg)) { const [t, d] = k.split("|"); (byDay[t + "|" + d] ||= []).push(o); }
+    for (const [k, o] of Object.entries(agg)) { const [t, d, , hr] = k.split("|"); o.hr = hr; (byDay[t + "|" + d] ||= []).push(o); }
     for (const [id, list] of Object.entries(byDay)) {
       const [t, d] = id.split("|"); const o = days[d] ||= { src: "apple-health" };
-      if (SUM.has(t)) { const v = Math.max(...list.map(x => x.sum)); // highest device total, never added across devices
+      if (SUM.has(t)) { let v;
+        if (t === "Sleep") v = Math.max(...list.map(x => x.sum)); // overlapping sleep from two devices: keep the larger
+        else { const byHr = {}; for (const x of list) byHr[x.hr] = Math.max(byHr[x.hr] || 0, x.sum); v = Object.values(byHr).reduce((p, c) => p + c, 0); } // per hour take the higher device, then add hours
         if (t === "StepCount") o.s = Math.round(v); else if (t === "ActiveEnergyBurned") o.k = Math.round(v); else o.sl = Math.round(v * 100) / 100; }
       else if (LAST.has(t)) { const x = list.reduce((p, c) => c.lastTs > p.lastTs ? c : p); const v = x.last;
         if (t === "BodyMass") o.w = Math.round(v * 10) / 10; else if (t === "BloodPressureSystolic") { o.bps = Math.round(v); o.bpat = x.lastTs; } else o.bpd = Math.round(v); }
@@ -1342,9 +1344,9 @@ async function loadHourly(d){
     const { data, error } = await SB.from("health_samples").select("src,ts,v").eq("kind", "steps").eq("day", d).limit(5000);
     if (error) throw error;
     const bySrc = {};
-    for (const x of data) { const h = parseInt(String(x.ts).slice(11, 13), 10); if (isNaN(h)) continue; (bySrc[x.src] ||= Array(24).fill(0))[h] += Number(x.v); }
-    const arrs = Object.values(bySrc).sort((a, b) => b.reduce((s, v) => s + v, 0) - a.reduce((s, v) => s + v, 0));
-    hourlyCache[d] = arrs.length && arrs[0].filter(v => v > 0).length > 1 ? arrs[0] : [];
+    for (const x of data) { if (String(x.ts).slice(11, 19) === "00:00:00") continue; const h = parseInt(String(x.ts).slice(11, 13), 10); if (isNaN(h)) continue; (bySrc[x.src] ||= Array(24).fill(0))[h] += Number(x.v); }
+    const arrs = Object.values(bySrc); const merged = Array(24).fill(0).map((_, h) => Math.max(0, ...arrs.map(a => a[h])));
+    hourlyCache[d] = arrs.length && merged.filter(v => v > 0).length > 1 ? merged : [];
   } catch (e) { hourlyCache[d] = []; }
   return hourlyCache[d];
 }
