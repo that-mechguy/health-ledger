@@ -963,7 +963,16 @@ $("#hkFile").onchange = async e => {
       let v = parseFloat(attr(a, "value")); if (isNaN(v)) continue; const unit = attr(a, "unit") || "";
       if (t === "BodyMass" && unit === "lb") v *= 0.453592; if (t === "ActiveEnergyBurned" && unit === "kJ") v /= 4.184;
       if (t === "OxygenSaturation" && v <= 1) v *= 100;
-      add(t + "|" + d + "|" + src + (t === "StepCount" || t === "ActiveEnergyBurned" ? "|" + sd.slice(11, 13) : ""), v, sd); } };
+      if (t === "StepCount" || t === "ActiveEnergyBurned") { spread(t, src, sd, attr(a, "endDate") || sd, v); continue; }
+      add(t + "|" + d + "|" + src, v, sd); } };
+  // steps & energy are spread minute by minute over each record's time span, so iPhone and watch can be combined the way Apple Health does
+  const MIN = {}; // type -> day -> source -> Float32Array(1440)
+  function spread(t, src, sd, ed, v){
+    const om = sd.match(/([+-])(\d{2})(\d{2})$/); const off = om ? (om[1] === "-" ? -1 : 1) * (+om[2] * 60 + +om[3]) * 60000 : 0;
+    const ls = toDate(sd).getTime() + off; let le = toDate(ed).getTime() + off; if (isNaN(ls)) return; if (!(le > ls) || le - ls > 864e5) le = ls + 1;
+    for (let c = ls; c < le; ) { const mEnd = Math.min(le, (Math.floor(c / 60000) + 1) * 60000); const dt = new Date(c); const day = dt.toISOString().slice(0, 10);
+      if (day >= since) { const arr = ((MIN[t] ||= {})[day] ||= {})[src] ||= new Float32Array(1440); arr[dt.getUTCHours() * 60 + dt.getUTCMinutes()] += v * (mEnd - c) / (le - ls); }
+      c = mEnd; } }
   try {
     let carry = "";
     const feed = text => { const t = carry + text; const i = t.lastIndexOf(">"); if (i < 0) { carry = t; return; } scan(t.slice(0, i+1)); carry = t.slice(i+1); };
@@ -981,6 +990,12 @@ $("#hkFile").onchange = async e => {
     // per day: steps & energy = the single source with the highest total (avoids iPhone + Watch double counting)
     const days = {};
     const SUM = new Set(["StepCount", "ActiveEnergyBurned", "Sleep"]), LAST = new Set(["BodyMass", "BloodPressureSystolic", "BloodPressureDiastolic"]);
+    const minuteHours = {}; // type|day -> [24] merged per-hour totals
+    for (const [t, byD] of Object.entries(MIN)) for (const [d, bySrc] of Object.entries(byD)) {
+      const arrs = Object.values(bySrc); const hrs = new Array(24).fill(0); let tot = 0;
+      for (let m = 0; m < 1440; m++) { let mx = 0; for (const a of arrs) if (a[m] > mx) mx = a[m]; hrs[m / 60 | 0] += mx; tot += mx; }
+      const o = days[d] ||= { src: "apple-health" }; if (t === "StepCount") o.s = Math.round(tot); else o.k = Math.round(tot);
+      minuteHours[t + "|" + d] = hrs; }
     const byDay = {}; // type|day -> list of per-source aggregates
     for (const [k, o] of Object.entries(agg)) { const [t, d, , hr] = k.split("|"); o.hr = hr; (byDay[t + "|" + d] ||= []).push(o); }
     for (const [id, list] of Object.entries(byDay)) {
@@ -998,12 +1013,14 @@ $("#hkFile").onchange = async e => {
     }
     const n = Object.keys(days).length; if (!n) throw new Error(`No Health records found on or after ${fmtD(since)}.`);
     toastMsg("#hkMsg", `Found ${n} days. Saving…`);
+    for (const [d, o] of Object.entries(days)) { const cur = S.activity[d]; if (!cur) continue;
+      if (cur.s != null && o.s != null && cur.s > o.s) delete o.s; if (cur.k != null && o.k != null && cur.k > o.k) delete o.k; }
     await mergeActivity(days);
     // keep hourly step/energy records for the last 60 days, so later syncs add to the full day instead of replacing it
     const cutoff = iso(new Date(Date.now() - 59*864e5)); const rows = []; const touched = new Set();
-    for (const [k, o] of Object.entries(agg)) { const [t, d, src, hr] = k.split("|");
-      if ((t !== "StepCount" && t !== "ActiveEnergyBurned") || d < cutoff || hr == null) continue;
-      rows.push({ user_id: S.uid, kind: t === "StepCount" ? "steps" : "kcal", src: "export:" + src, ts: `${d} ${hr}:00:01 export`, day: d, v: Math.round(o.sum * 10) / 10 }); touched.add(d); }
+    for (const [k, hrs] of Object.entries(minuteHours)) { const [t, d] = k.split("|"); if (d < cutoff) continue;
+      hrs.forEach((v, h) => { if (v > 0) rows.push({ user_id: S.uid, kind: t === "StepCount" ? "steps" : "kcal", src: "export", ts: `${d} ${String(h).padStart(2, "0")}:00:01 export`, day: d, v: Math.round(v * 10) / 10 }); });
+      touched.add(d); }
     for (let i = 0; i < rows.length; i += 500) { const { error } = await SB.from("health_samples").upsert(rows.slice(i, i + 500), { onConflict: "user_id,kind,src,ts" }); if (error) throw error; }
     if (touched.size) { const { error } = await SB.rpc("recalc_activity", { days: [...touched] }); if (error) throw error; }
     S.activity = await fetchAllHealth(); for (const k in hourlyCache) delete hourlyCache[k]; renderAll();
