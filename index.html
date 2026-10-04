@@ -999,6 +999,14 @@ $("#hkFile").onchange = async e => {
     const n = Object.keys(days).length; if (!n) throw new Error(`No Health records found on or after ${fmtD(since)}.`);
     toastMsg("#hkMsg", `Found ${n} days. Saving…`);
     await mergeActivity(days);
+    // keep hourly step/energy records for the last 60 days, so later syncs add to the full day instead of replacing it
+    const cutoff = iso(new Date(Date.now() - 59*864e5)); const rows = []; const touched = new Set();
+    for (const [k, o] of Object.entries(agg)) { const [t, d, src, hr] = k.split("|");
+      if ((t !== "StepCount" && t !== "ActiveEnergyBurned") || d < cutoff || hr == null) continue;
+      rows.push({ user_id: S.uid, kind: t === "StepCount" ? "steps" : "kcal", src: "export:" + src, ts: `${d} ${hr}:00:01 export`, day: d, v: Math.round(o.sum * 10) / 10 }); touched.add(d); }
+    for (let i = 0; i < rows.length; i += 500) { const { error } = await SB.from("health_samples").upsert(rows.slice(i, i + 500), { onConflict: "user_id,kind,src,ts" }); if (error) throw error; }
+    if (touched.size) { const { error } = await SB.rpc("recalc_activity", { days: [...touched] }); if (error) throw error; }
+    S.activity = await fetchAllHealth(); for (const k in hourlyCache) delete hourlyCache[k]; renderAll();
     toastMsg("#hkMsg", `Imported ${n} days from Apple Health.`); bar.style.width = "100%";
   } catch (err) { toastMsg("#hkMsg", "Import stopped: " + esc(err.message || err.code), true); }
   finally { e.target.value = ""; setTimeout(() => prog.hidden = true, 1500); }
