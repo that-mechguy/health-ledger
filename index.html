@@ -239,6 +239,18 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
 @media (max-width:720px){.today-hero{grid-template-columns:1fr}}
 .today-steps .big{font-family:var(--f-display);font-size:2.8rem;font-weight:700;line-height:1;letter-spacing:-.02em}
 .today-steps .bar{height:10px;margin:10px 0 6px}
+.rd-rings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:640px){.rd-rings{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}}
+.rd-ring{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;min-width:0}
+.rd-ring svg{width:100%;max-width:170px;height:auto}
+.rd-val{position:absolute;top:0;left:0;right:0;aspect-ratio:1;max-width:170px;margin:0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.rd-big{font-family:var(--f-display);font-weight:700;font-size:clamp(1.3rem,5vw,2.3rem);line-height:1}
+.rd-lbl{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin-top:4px}
+.rd-sub{font-size:.78rem;color:var(--ink-2);margin-top:6px}
+.zbar{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px;background:var(--surface)}
+.zbar i{display:block;min-width:2px}
+.zleg{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:.74rem;color:var(--ink-2);margin-top:8px}
+.zleg span{display:inline-flex;align-items:center;gap:4px}
 .sync-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
 </style>
 </head>
@@ -255,6 +267,7 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
       <button class="tab" role="tab" data-tab="history" aria-selected="false">History</button>
       <button class="tab" role="tab" data-tab="body" aria-selected="false">Body scan</button>
       <button class="tab" role="tab" data-tab="activity" aria-selected="false">Activity</button>
+      <button class="tab" role="tab" data-tab="readiness" aria-selected="false">Readiness</button>
       <button class="tab" role="tab" data-tab="reports" aria-selected="false">Reports</button>
       <button class="tab" role="tab" data-tab="settings" aria-selected="false">Settings</button>
     </nav>
@@ -395,6 +408,37 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- READINESS -->
+  <section class="view" id="v-readiness" hidden>
+    <div class="card">
+      <div class="card-h">
+        <div><h2 id="rdTitle">Readiness</h2><div class="small muted" id="rdSub"></div></div>
+        <div class="row">
+          <button class="pill-btn" id="rdPrev" type="button" aria-label="Previous day">‹</button>
+          <button class="pill-btn" id="rdToday" type="button">Today</button>
+          <button class="pill-btn" id="rdNext" type="button" aria-label="Next day">›</button>
+        </div>
+      </div>
+      <div class="rd-rings" id="rdRings"></div>
+      <div class="notice" id="rdNote" style="margin-top:16px"></div>
+    </div>
+    <div class="grid g3">
+      <div class="card"><div class="card-h"><h2>Recovery</h2><span class="hint">vs your 30-day baseline</span></div><div id="rdRecovery"></div></div>
+      <div class="card"><div class="card-h"><h2>Strain</h2><span class="hint">0–21, from heart-rate zones</span></div><div id="rdStrain"></div></div>
+      <div class="card"><div class="card-h"><h2>Sleep</h2><span class="hint">Slept vs needed</span></div><div id="rdSleep"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Last 30 days</h2><span class="hint">Tap or hover a point for the day</span></div>
+      <div class="grid g2">
+        <div style="min-width:0"><div class="eyebrow">Recovery, %</div><div class="chart" id="rdRecChart"></div></div>
+        <div style="min-width:0"><div class="eyebrow">Strain, 0–21</div><div class="chart" id="rdStrChart"></div></div>
+        <div style="min-width:0"><div class="eyebrow">HRV, ms (band = your normal range)</div><div class="chart" id="rdHrvChart"></div></div>
+        <div style="min-width:0"><div class="eyebrow">Resting heart rate, bpm (band = your normal range)</div><div class="chart" id="rdRhrChart"></div></div>
+      </div>
+    </div>
+    <p class="small muted">These scores are calculated here, modelled on how WHOOP describes its approach (comparing each night with your own baseline, and heart-rate zones for strain). They are not WHOOP's algorithm or numbers, and not medical advice. They get more reliable after ~2 weeks of data, and much better with continuous heart rate and HRV from a band like the Fitbit Air.</p>
   </section>
 
   <!-- REPORTS -->
@@ -905,14 +949,14 @@ function renderHeader(){
   const n = S.reports.length;
   $("#lastUpdated").textContent = !S.loadedR ? "Loading your records…" : n ? `${n} reports · latest ${fmtD(S.reports.map(r => r.date).sort().pop())}` : "No reports yet";
 }
-function renderAll(){ derive(); renderHeader(); renderOverview(); renderResults(); if (S.tab === "history") renderHistory(); if (S.tab === "body") renderBody(); if (S.tab === "activity") renderActivity(); if (S.tab === "settings") renderSettings(); renderReports(); }
+function renderAll(){ derive(); renderHeader(); renderOverview(); renderResults(); if (S.tab === "history") renderHistory(); if (S.tab === "body") renderBody(); if (S.tab === "activity") renderActivity(); if (S.tab === "readiness") renderReadiness(); if (S.tab === "settings") renderSettings(); renderReports(); }
 
 /* ---------- tabs ---------- */
 function go(tab, anchor){
   S.tab = tab;
   document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === tab)));
   document.querySelectorAll("section.view").forEach(s => s.hidden = s.id !== "v-" + tab);
-  if (tab === "history") renderHistory(); if (tab === "body") renderBody(); if (tab === "activity") renderActivity(); if (tab === "settings") renderSettings();
+  if (tab === "history") renderHistory(); if (tab === "body") renderBody(); if (tab === "activity") renderActivity(); if (tab === "readiness") renderReadiness(); if (tab === "settings") renderSettings();
   try { localStorage.setItem("hl-tab", tab); } catch(e) {}
   if (anchor) { const el = document.getElementById("cat-" + anchor); if (el) setTimeout(() => el.scrollIntoView({behavior:"smooth", block:"start"}), 30); }
   else window.scrollTo({top:0});
@@ -1145,6 +1189,7 @@ async function loadAll(){
     S.reports = r.data.map(x => ({ ...x.doc, id: x.id, type: x.type, date: x.date, filePath: x.file_path }));
     S.activity = h;
     for (const k in hourlyCache) delete hourlyCache[k];
+    S.hrSamples = null;
     S.settings = st.data || {};
     S.sync.keys = k.data || [];
     S.sync.lastUsed = S.sync.keys.map(x => x.last_used).filter(Boolean).sort().pop() || null;
@@ -1588,6 +1633,153 @@ async function onSignedIn(session){
   $("#gate").hidden = true;
   await loadAll();
 }
+
+
+/* ================= Readiness (WHOOP-style) ================= */
+S.rdOff = 0; S.hrSamples = null; let hrLoading = null;
+const rdAge = () => { const m = String(S.settings.about || "").match(/(\d{2})\s*(?:-?\s*(?:year|yr|y\/o|yo)|,)/i); const a = m ? +m[1] : 30; return a >= 15 && a <= 90 ? a : 30; };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const dayShift = (d, n) => iso(new Date(pd(d).getTime() + n * 864e5));
+async function loadHrSamples(){
+  if (S.hrSamples) return S.hrSamples;
+  if (hrLoading) return hrLoading;
+  hrLoading = (async () => {
+    const out = {}; const start = dayShift(todayISO(), -59);
+    try {
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await SB.from("health_samples").select("ts,v,day").eq("kind", "hr").gte("day", start).order("ts").range(from, from + 999);
+        if (error) throw error;
+        for (const x of data) { if (String(x.ts).slice(11, 19) === "00:00:00") continue; (out[x.day] ||= []).push({ ts: x.ts, v: Number(x.v) }); }
+        if (data.length < 1000) break;
+      }
+    } catch (e) {}
+    S.hrSamples = out; hrLoading = null; return out;
+  })();
+  return hrLoading;
+}
+// personal baseline for a metric: values from the 30 days before `d`
+function baseline(d, f){
+  const vals = []; for (let i = 1; i <= 30; i++) { const r = S.activity[dayShift(d, -i)]; if (r && r[f] != null) vals.push(r[f]); }
+  if (vals.length < 5) return null;
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length) || mean * 0.05 || 1;
+  return { mean, sd: Math.max(sd, mean * 0.03), n: vals.length };
+}
+function strainFor(d){
+  const age = rdAge(); const maxHr = 208 - 0.7 * age;
+  const rb = baseline(d, "h"); const rest = S.activity[d]?.h ?? rb?.mean ?? 65;
+  const samples = (S.hrSamples || {})[d] || [];
+  const zones = [0, 0, 0, 0, 0, 0]; let covered = 0;
+  const sorted = samples.slice().sort((a, b) => a.ts < b.ts ? -1 : 1);
+  for (let i = 0; i < sorted.length; i++) {
+    const t = toMin(sorted[i].ts), next = i + 1 < sorted.length ? toMin(sorted[i + 1].ts) : t + 1;
+    const mins = clamp(next - t, 1, 10); covered += mins;
+    const pct = (sorted[i].v - rest) / Math.max(20, maxHr - rest);
+    const z = pct < 0.5 ? 0 : pct < 0.6 ? 1 : pct < 0.7 ? 2 : pct < 0.8 ? 3 : pct < 0.9 ? 4 : 5;
+    zones[z] += mins;
+  }
+  const hrLoad = zones.reduce((a, m, z) => a + m * z, 0);
+  const steps = S.activity[d]?.s || 0; const stepLoad = steps / 100;
+  const goodHr = covered >= 6 * 60;
+  const load = goodHr ? hrLoad : Math.max(hrLoad, stepLoad);
+  const strain = Math.round(21 * (1 - Math.exp(-load / 250)) * 10) / 10;
+  return { strain, zones, covered, basis: goodHr ? "hr" : hrLoad > stepLoad ? "hr-partial" : steps ? "steps" : "none", samples: sorted.length, maxHr: Math.round(maxHr), rest: Math.round(rest) };
+}
+function toMin(ts){ const m = String(ts).match(/ (\d{2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : 0; }
+function sleepFor(d){
+  const slept = S.activity[d]?.sl;
+  const base = 7.5;
+  let debt = 0, nights = 0; for (let i = 1; i <= 3; i++) { const v = S.activity[dayShift(d, -i)]?.sl; if (v != null) { debt += Math.max(0, base - v); nights++; } }
+  debt = nights ? debt / nights : 0;
+  const prevStrain = strainFor(dayShift(d, -1)).strain;
+  const need = Math.round((base + Math.max(0, prevStrain - 10) * 0.08 + debt * 0.3) * 10) / 10;
+  const perf = slept != null ? Math.round(clamp(slept / need * 100, 0, 100)) : null;
+  return { slept, need, perf, debt: Math.round(debt * 10) / 10, prevStrain };
+}
+function recoveryFor(d){
+  const r = S.activity[d] || {}; const sl = sleepFor(d);
+  const parts = [];
+  const add = (key, label, val, f, w, higherBetter, unit, dp) => {
+    if (val == null) return; const b = baseline(d, f); if (!b) { parts.push({ key, label, val, unit, dp, w: 0, note: "building baseline" }); return; }
+    const z = clamp((val - b.mean) / b.sd * (higherBetter ? 1 : -1), -2.5, 2.5);
+    parts.push({ key, label, val, unit, dp, w, z, mean: b.mean, pct: (val - b.mean) / b.mean * 100, higherBetter });
+  };
+  add("hrv", "HRV", r.hrv, "hrv", 0.5, true, "ms", 0);
+  add("rhr", "Resting HR", r.h, "h", 0.25, false, "bpm", 0);
+  add("rr", "Breathing rate", r.rr, "rr", 0.1, false, "/min", 1);
+  if (sl.perf != null) parts.push({ key: "sleep", label: "Sleep", val: sl.perf, unit: "% of need", dp: 0, w: 0.15, z: clamp((sl.perf - 85) / 10, -2.5, 2.5) });
+  const used = parts.filter(p => p.w > 0); const W = used.reduce((a, p) => a + p.w, 0);
+  const score = W ? Math.round(clamp(50 + used.reduce((a, p) => a + p.w * p.z, 0) / W * 20, 1, 99)) : null;
+  const hasHrv = used.some(p => p.key === "hrv");
+  return { score, parts, hasHrv, W };
+}
+const recColor = s => s == null ? "var(--muted)" : s >= 67 ? "var(--ok)" : s >= 34 ? "var(--warn)" : "var(--bad)";
+const recLabel = s => s == null ? "Not enough data" : s >= 67 ? "Green: ready to push" : s >= 34 ? "Yellow: moderate" : "Red: prioritise rest";
+function bigRing(val, max, color, label, sub, fmt){
+  const r = 62, c = 2 * Math.PI * r, f = val == null ? 0 : clamp(val / max, 0, 1);
+  return `<div class="rd-ring"><svg viewBox="0 0 150 150" aria-hidden="true"><circle cx="75" cy="75" r="${r}" fill="none" stroke="var(--line)" stroke-width="12"/>
+    <circle cx="75" cy="75" r="${r}" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${(c * f).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 75 75)"/></svg>
+    <div class="rd-val"><div class="rd-big" style="color:${color}">${val == null ? "—" : fmt(val)}</div><div class="rd-lbl">${label}</div></div><div class="rd-sub">${sub}</div></div>`;
+}
+async function renderReadiness(){
+  const d = dayShift(todayISO(), -S.rdOff);
+  $("#rdTitle").textContent = S.rdOff === 0 ? "Readiness · today" : S.rdOff === 1 ? "Readiness · yesterday" : "Readiness · " + fmtD(d);
+  $("#rdSub").textContent = fmtD(d) + (S.sync.lastUsed ? ` · last sync ${ago(S.sync.lastUsed)}` : "");
+  $("#rdToday").setAttribute("aria-pressed", String(S.rdOff === 0)); $("#rdNext").disabled = S.rdOff === 0;
+  if (SB && S.uid && !S.hrSamples) { $("#rdRings").innerHTML = `<div class="empty">Loading heart-rate data…</div>`; await loadHrSamples(); }
+  const rec = recoveryFor(d), st = strainFor(d), sl = sleepFor(d);
+  const target = rec.score == null ? [8, 14] : rec.score >= 67 ? [14, 18] : rec.score >= 34 ? [10, 14] : [6, 10];
+  $("#rdRings").innerHTML =
+    bigRing(rec.score, 100, recColor(rec.score), "Recovery", recLabel(rec.score), v => v + "%") +
+    bigRing(st.strain, 21, "var(--accent)", "Strain", `Target today ${target[0]}–${target[1]}`, v => v.toFixed(1)) +
+    bigRing(sl.perf, 100, "#6C63C7", "Sleep", sl.slept != null ? `${fmtN(sl.slept, 1)} h of ${fmtN(sl.need, 1)} h needed` : "No sleep data", v => v + "%");
+  // plain-language note
+  const bits = [];
+  if (rec.score != null) {
+    const drivers = rec.parts.filter(p => p.w > 0).sort((a, b) => Math.abs(b.z) - Math.abs(a.z)).slice(0, 2)
+      .map(p => p.key === "sleep" ? `sleep at ${p.val}% of need` : `${p.label} ${Math.abs(p.pct).toFixed(0)}% ${p.pct >= 0 ? "above" : "below"} your normal`);
+    bits.push(`<b>Recovery ${rec.score}%</b> (${recLabel(rec.score).split(":")[0].toLowerCase()})${drivers.length ? ", mainly " + drivers.join(" and ") : ""}.`);
+    bits.push(rec.score >= 67 ? `A good day for a harder session: aim for strain ${target[0]}–${target[1]}.` : rec.score >= 34 ? `Train moderately: strain ${target[0]}–${target[1]} is a sensible range.` : `Keep it light (strain ${target[0]}–${target[1]}) and prioritise sleep tonight.`);
+  } else bits.push("Recovery needs at least 5 days of resting heart rate or sleep history to compare against. It fills in on its own as data syncs.");
+  if (!rec.hasHrv) bits.push(`<span class="muted">Without HRV (needs a band such as the Fitbit Air), recovery leans on resting heart rate, breathing rate and sleep, so treat it as an estimate.</span>`);
+  if (sl.debt >= 0.5) bits.push(`Sleep debt: about ${fmtN(sl.debt, 1)} h/night over the last 3 nights.`);
+  $("#rdNote").innerHTML = bits.join(" ");
+  // recovery breakdown
+  $("#rdRecovery").innerHTML = rec.parts.length ? rec.parts.map(p => {
+    const good = p.z == null ? null : p.z >= 0.3 ? "ok" : p.z <= -0.3 ? "out" : "border";
+    const cmp = p.mean != null ? `normal ${fmtN(p.mean, p.dp)} ${esc(p.unit)} · ${p.pct >= 0 ? "+" : ""}${p.pct.toFixed(0)}%` : p.note || "";
+    return `<div class="lrow"><div class="n">${esc(p.label)} ${good ? chip(good, good === "ok" ? "Helping" : good === "out" ? "Pulling down" : "Neutral") : chip("info", "Baseline building")}</div><div class="v">${fmtN(p.val, p.dp)} <span class="small muted">${esc(p.unit)}</span></div><div class="d">${[cmp, p.w ? `weight ${Math.round(p.w / (rec.W || 1) * 100)}%` : ""].filter(Boolean).join(" · ")}</div></div>`;
+  }).join("") + (rec.hasHrv ? "" : `<div class="lrow"><div class="n">HRV ${chip("info", "Not available")}</div><div class="v">—</div><div class="d">The biggest input to recovery. Your current devices don't send it; the Fitbit Air will (via the direct connection).</div></div>`)
+    : `<div class="empty">No resting heart rate, breathing rate or sleep for this day yet.</div>`;
+  // strain breakdown
+  const zl = ["<50%", "50–60%", "60–70%", "70–80%", "80–90%", "90%+"], zc = ["var(--line)", "#9DB4E8", "#6E8FD6", "var(--accent)", "var(--warn)", "var(--bad)"];
+  const zt = st.zones.reduce((a, b) => a + b, 0) || 1;
+  $("#rdStrain").innerHTML = `
+    <div class="small" style="margin-bottom:8px">Time in heart-rate zones (% of heart-rate reserve; max HR ≈ ${st.maxHr}, resting ${st.rest})</div>
+    <div class="zbar">${st.zones.map((m, i) => m ? `<i style="flex:${m};background:${zc[i]}" title="${zl[i]}: ${Math.round(m)} min"></i>` : "").join("") || `<i style="flex:1;background:var(--line)"></i>`}</div>
+    <div class="zleg">${st.zones.map((m, i) => `<span><span class="dot" style="background:${zc[i]}"></span>${zl[i]} <b class="mono">${Math.round(m)}m</b></span>`).join("")}</div>
+    <div class="small muted" style="margin-top:8px">${st.basis === "hr" ? `Based on ${st.samples} heart-rate readings covering ${Math.round(st.covered / 60)} h.` :
+      st.basis === "hr-partial" ? `Only ${st.samples} heart-rate readings today (${Math.round(st.covered / 60)} h covered), so strain is partial. A band with continuous heart rate fixes this.` :
+      st.basis === "steps" ? `Too few heart-rate readings, so strain is estimated from your ${(S.activity[d]?.s || 0).toLocaleString("en-IN")} steps.` : "No heart-rate or step data for this day."}</div>`;
+  // sleep
+  $("#rdSleep").innerHTML = sl.slept == null ? `<div class="empty">No sleep recorded for the night before ${fmtD(d)}.</div>` : `
+    <div class="lrow"><div class="n">Slept</div><div class="v">${fmtN(sl.slept, 1)} h</div></div>
+    <div class="lrow"><div class="n">Needed</div><div class="v">${fmtN(sl.need, 1)} h</div><div class="d">7.5 h base${sl.prevStrain > 10 ? ` + extra for yesterday's strain ${sl.prevStrain}` : ""}${sl.debt > 0 ? ` + catch-up for ${fmtN(sl.debt, 1)} h/night debt` : ""}</div></div>
+    <div class="lrow"><div class="n">Performance</div><div class="v">${sl.perf}%</div><div class="d">${sl.perf >= 85 ? "Good: enough to recover" : sl.perf >= 70 ? "Fair: a bit short" : "Short: recovery will suffer"}</div></div>`;
+  // 30-day trends
+  const days = []; for (let i = 29; i >= 0; i--) days.push(dayShift(todayISO(), -i));
+  const recPts = days.map(x => ({ x, r: recoveryFor(x).score })).filter(p => p.r != null).map(p => ({ x: p.x, y: p.r, st: p.r >= 67 ? "ok" : p.r >= 34 ? "border" : "out" }));
+  if (recPts.length) lineChart($("#rdRecChart"), recPts, { unit: "%", aria: "Recovery", h: 200, labelEnds: false }); else $("#rdRecChart").innerHTML = `<div class="empty">Appears after about a week of data.</div>`;
+  barChart($("#rdStrChart"), days.map(x => ({ d: x, v: (S.activity[x] || (S.hrSamples || {})[x]) ? strainFor(x).strain : null })), { h: 200, unit: "strain", aria: "Strain", xl: x => { const dd = pd(x.d); return `${dd.getUTCDate()} ${MON[dd.getUTCMonth()]}`; }, tl: x => fmtD(x.d), empty: "No strain data yet." });
+  const band = f => { const b = baseline(todayISO(), f); return b ? { low: Math.round((b.mean - b.sd) * 10) / 10, high: Math.round((b.mean + b.sd) * 10) / 10 } : {}; };
+  const series = f => days.map(x => ({ x, y: S.activity[x]?.[f] })).filter(p => p.y != null).map(p => ({ ...p, color: "var(--accent)" }));
+  const hv = series("hrv"), rh = series("h");
+  if (hv.length) lineChart($("#rdHrvChart"), hv, { ...band("hrv"), unit: "ms", aria: "HRV", h: 200, labelEnds: false }); else $("#rdHrvChart").innerHTML = `<div class="empty">No HRV yet. It arrives with a band such as the Fitbit Air.</div>`;
+  if (rh.length) lineChart($("#rdRhrChart"), rh, { ...band("h"), unit: "bpm", aria: "Resting heart rate", h: 200, labelEnds: false }); else $("#rdRhrChart").innerHTML = `<div class="empty">No resting heart rate yet.</div>`;
+}
+$("#rdPrev").onclick = () => { S.rdOff = Math.min(29, S.rdOff + 1); renderReadiness(); };
+$("#rdNext").onclick = () => { S.rdOff = Math.max(0, S.rdOff - 1); renderReadiness(); };
+$("#rdToday").onclick = () => { S.rdOff = 0; renderReadiness(); };
 
 /* ---- boot ---- */
 document.addEventListener("click", e => { const a = e.target.closest('a[href="#settings"]'); if (a) { e.preventDefault(); go("settings"); } });
