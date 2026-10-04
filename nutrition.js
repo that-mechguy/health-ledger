@@ -79,7 +79,7 @@ css.textContent = `
 .nu-chips{display:flex;gap:6px;flex-wrap:wrap}
 .nu-search{position:relative;margin-top:12px}
 .nu-search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted)}
-.nu-search input{width:100%;padding:9px 12px 9px 36px;border:1px solid var(--line);border-radius:9px;background:var(--surface)}
+.nu-search input{width:100%;padding:9px 12px 9px 36px!important;border:1px solid var(--line);border-radius:9px;background:var(--surface)}
 .nu-res{border:1px solid var(--line);border-radius:10px;margin-top:6px;overflow:hidden}
 .nu-res button{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1px 10px;width:100%;padding:9px 12px;border-top:1px solid var(--line)}
 .nu-res button:first-child{border-top:0}
@@ -99,6 +99,7 @@ css.textContent = `
 .nu-form label{font-size:.76rem;color:var(--muted);font-weight:600;display:flex;flex-direction:column;gap:4px}
 .nu-form .full{grid-column:1/-1}
 .nu-form input,.nu-form select,.nu-form textarea,.nu-field{width:100%;min-width:0}
+#v-nutrition input:not([type=checkbox]):not([type=file]),#v-nutrition select,#v-nutrition textarea,.sheet .nu-form input:not([type=checkbox]),.sheet .nu-form select,.sheet .nu-form textarea,.sheet .nu-field{border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--surface);font-size:16px;color:var(--ink)}
 .nu-sec{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin:14px 0 6px}
 .nu-meal+.nu-meal{border-top:1px solid var(--line);margin-top:6px;padding-top:10px}
 .nu-meal-h{display:flex;justify-content:space-between;align-items:baseline}
@@ -108,7 +109,10 @@ css.textContent = `
 .nu-item .s{grid-column:1/2;font-size:.74rem;color:var(--muted);font-family:var(--f-mono);display:flex;gap:8px;flex-wrap:wrap}
 .nu-item .s span{font-family:var(--f-body)}
 .nu-item .v{font-family:var(--f-mono);font-size:.9rem;grid-row:1/3;grid-column:2}
-.nu-x{border:0;background:none;color:var(--muted);padding:4px 7px;border-radius:6px;grid-row:1/3;grid-column:3}
+.nu-x{border:0;background:none;color:var(--muted);padding:4px 7px;border-radius:6px}
+.nu-acts{grid-row:1/3;grid-column:3;display:flex;gap:2px}
+.nu-item{grid-template-columns:minmax(0,1fr) auto auto!important}
+.nu-item .n{cursor:pointer}
 .nu-x:hover{color:var(--bad);background:var(--bad-bg)}
 .nu-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
 .nu-meter{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
@@ -153,7 +157,7 @@ css.textContent = `
 `;
 document.head.appendChild(css);
 
-function toast(msg){ const t = document.createElement("div"); t.className = "nu-toast"; t.setAttribute("role", "status"); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
+function toast(msg){ document.querySelectorAll(".nu-toast").forEach(x => x.remove()); const t = document.createElement("div"); t.className = "nu-toast"; t.setAttribute("role", "status"); t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
 function sheet(html){
   const bg = document.createElement("div"); bg.className = "sheet-bg";
   bg.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" style="width:min(600px,100%)">${html}</div>`;
@@ -206,12 +210,16 @@ root.innerHTML = `
         <div id="nuPreview"></div>
         <div class="nu-row"><button class="btn" id="nuManT" style="border:0;padding:4px 0;color:var(--accent)">+ Add manually</button></div>
         <form class="nu-form" id="nuMan" hidden>
-          <label class="full">Food<input id="nuMName" required></label>
-          <label>Calories<input id="nuMK" type="number" min="0" step="any" inputmode="decimal" required></label>
-          <label>Protein g<input id="nuMP" type="number" min="0" step="any" inputmode="decimal" value="0"></label>
-          <label>Carbs g<input id="nuMC" type="number" min="0" step="any" inputmode="decimal" value="0"></label>
-          <label>Fat g<input id="nuMF" type="number" min="0" step="any" inputmode="decimal" value="0"></label>
-          <label class="full">Sodium mg (optional)<input id="nuMNa" type="number" min="0" step="any" inputmode="decimal"></label>
+          <label class="full">Food<input id="nuMName" required placeholder="e.g. Skyr Greek yogurt"></label>
+          <div class="full row"><span class="small muted">Values are</span><button type="button" class="pill-btn" data-mb="100" aria-pressed="true">Per 100 g (from the label)</button><button type="button" class="pill-btn" data-mb="tot" aria-pressed="false">Total for what I ate</button></div>
+          <label class="full" id="nuMAmtL">Amount you ate (g or ml)<input id="nuMAmt" type="number" min="0" step="any" inputmode="decimal" value="100"></label>
+          <label><span class="nuMU">Calories / 100 g</span><input id="nuMK" type="number" min="0" step="any" inputmode="decimal"></label>
+          <label><span class="nuMU">Protein g / 100 g</span><input id="nuMP" type="number" min="0" step="any" inputmode="decimal" placeholder="0"></label>
+          <label><span class="nuMU">Carbs g / 100 g</span><input id="nuMC" type="number" min="0" step="any" inputmode="decimal" placeholder="0"></label>
+          <label><span class="nuMU">Fat g / 100 g</span><input id="nuMF" type="number" min="0" step="any" inputmode="decimal" placeholder="0"></label>
+          <label class="full"><span class="nuMU">Sodium mg / 100 g</span> (optional)<input id="nuMNa" type="number" min="0" step="any" inputmode="decimal"></label>
+          <div class="full nu-calc" style="margin:2px 0"><span id="nuMSum"></span><span><b id="nuMTot">0</b> kcal</span></div>
+          <div class="full small" id="nuMWarn" style="color:var(--warn)" hidden>Protein, carbs and fat are all 0. Fill them in if the label has them, so your protein total stays right.</div>
           <div class="full row" style="justify-content:flex-end"><button class="btn" type="button" id="nuManX">Cancel</button><button class="btn primary" type="submit">Add</button></div>
         </form>
       </div>
@@ -303,6 +311,37 @@ async function addEntries(list){
   if (error) { toast("Couldn't save: " + error.message); throw error; }
   N.entries.push(...rows.map(rowToEntry)); NU.render();
   return rows.map(rowToEntry);
+}
+async function updateEntry(id, patch){
+  const row = { name: patch.name, serving: patch.serving, kcal: r0(patch.kcal), protein_g: r1(patch.p), carbs_g: r1(patch.c), fat_g: r1(patch.f), sodium_mg: patch.na == null || patch.na === "" ? null : r0(patch.na), meal: patch.meal, day: patch.date };
+  const { error } = await sb().from("food_entries").update(row).eq("id", id);
+  if (error) { toast("Couldn't save: " + error.message); throw error; }
+  const i = N.entries.findIndex(x => x.id === id); if (i >= 0) N.entries[i] = { ...N.entries[i], ...patch }; NU.render();
+}
+function openEditEntry(x){
+  if (!x) return;
+  const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>Edit entry</h2>${closeBtn}</div>
+    <form class="nu-form" id="eeF">
+      <label class="full">Food<input name="name" required value="${e2(x.name)}"></label>
+      <label class="full">Serving<input name="serving" value="${e2(x.serving || "")}"></label>
+      <label>Calories<input name="kcal" type="number" min="0" step="any" inputmode="decimal" value="${x.kcal}"></label>
+      <label>Protein g<input name="p" type="number" min="0" step="any" inputmode="decimal" value="${x.p}"></label>
+      <label>Carbs g<input name="c" type="number" min="0" step="any" inputmode="decimal" value="${x.c}"></label>
+      <label>Fat g<input name="f" type="number" min="0" step="any" inputmode="decimal" value="${x.f}"></label>
+      <label>Sodium mg<input name="na" type="number" min="0" step="any" inputmode="decimal" value="${x.na ?? ""}"></label>
+      <label>Meal<select name="meal">${MEALS.map(m => `<option value="${m.id}" ${m.id === x.meal ? "selected" : ""}>${m.name}</option>`).join("")}</select></label>
+      <label>Date<input name="date" type="date" max="${N.today}" value="${x.date}"></label>
+      <label>Scale everything ×<input name="scale" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 1.5"></label>
+      <div class="full small muted">Scale multiplies calories, macros and sodium, e.g. ×1.5 if you had 150 g instead of 100 g.</div>
+      <div class="full row" style="justify-content:space-between"><button type="button" class="btn" id="eeDel" style="color:var(--bad)">Delete</button><button class="btn primary" type="submit">Save</button></div>
+    </form>`);
+  const fm = bg.querySelector("#eeF");
+  fm.elements.scale.oninput = () => { const k = +fm.elements.scale.value; if (!(k > 0)) return;
+    for (const n of ["kcal", "p", "c", "f", "na"]) { const base = n === "na" ? x.na : x[n]; if (base != null && base !== "") fm.elements[n].value = n === "kcal" || n === "na" ? r0(base * k) : r1(base * k); } };
+  fm.onsubmit = async ev => { ev.preventDefault(); const f = new FormData(fm);
+    const patch = { name: String(f.get("name")).trim(), serving: String(f.get("serving") || ""), kcal: +f.get("kcal") || 0, p: +f.get("p") || 0, c: +f.get("c") || 0, f: +f.get("f") || 0, na: f.get("na") === "" ? null : +f.get("na"), meal: f.get("meal"), date: f.get("date") || x.date };
+    try { await updateEntry(x.id, patch); toast("Saved"); bg.close(); } catch {} };
+  bg.querySelector("#eeDel").onclick = async () => { await removeEntry(x.id); toast(`Removed ${x.name}`); bg.close(); };
 }
 async function removeEntry(id){
   const { error } = await sb().from("food_entries").delete().eq("id", id);
@@ -449,7 +488,7 @@ function renderDiary(){
     return `<div class="nu-meal"><div class="nu-meal-h"><h3>${m.name}</h3><span class="mono small">${list.length ? nf(kc) + " kcal" : ""}</span></div>
       ${list.length ? list.map(x => `<div class="nu-item"><div class="n">${e2(x.name)}</div>
         <div class="s">${x.serving ? `<span>${e2(x.serving)}</span>` : ""}<i>P ${r1(x.p)}</i><i>C ${r1(x.c)}</i><i>F ${r1(x.f)}</i>${x.na != null ? `<i>Na ${nf(x.na)}</i>` : ""}</div>
-        <div class="v">${nf(x.kcal)}</div><button class="nu-x" data-del="${e2(x.id)}" aria-label="Delete ${e2(x.name)}">✕</button></div>`).join("")
+        <div class="v">${nf(x.kcal)}</div><span class="nu-acts"><button class="nu-x" data-edit-e="${e2(x.id)}" aria-label="Edit ${e2(x.name)}" title="Edit">✎</button><button class="nu-x" data-del="${e2(x.id)}" aria-label="Delete ${e2(x.name)}" title="Delete">✕</button></span></div>`).join("")
       : `<div class="small muted" style="padding:2px 0 6px">Nothing logged</div>`}</div>`;
   }).join("");
 }
@@ -465,7 +504,10 @@ try { const s = localStorage.getItem("hl-nu-sub"); if (s === "supp" || s === "fo
 q("#nuMeals").onclick = ev => { const b = ev.target.closest("[data-meal]"); if (b) { N.meal = b.dataset.meal; NU.render(); } };
 q("#nuWP").onclick = () => addWater(GLASS);
 q("#nuWM").onclick = () => { if (waterOn(N.day) >= GLASS) addWater(-GLASS); };
-q("#nuDiary").onclick = async ev => { const b = ev.target.closest("[data-del]"); if (!b) return; const it = N.entries.find(x => x.id === b.dataset.del); b.disabled = true; await removeEntry(b.dataset.del); if (it) toast(`Removed ${it.name}`); };
+q("#nuDiary").onclick = async ev => {
+  const ed = ev.target.closest("[data-edit-e]") || (ev.target.closest(".nu-item .n") && ev.target.closest(".nu-item").querySelector("[data-edit-e]"));
+  if (ed) { openEditEntry(N.entries.find(x => x.id === ed.dataset.editE)); return; }
+  const b = ev.target.closest("[data-del]"); if (!b) return; const it = N.entries.find(x => x.id === b.dataset.del); b.disabled = true; await removeEntry(b.dataset.del); if (it) toast(`Removed ${it.name}`); };
 q("#nuPlanBtn").onclick = openPlan;
 let rsz; window.addEventListener("resize", () => { clearTimeout(rsz); rsz = setTimeout(() => { if (!root.hidden) renderChart(); }, 150); });
 setInterval(() => { const t = today(); if (t !== N.today) { const was = N.day === N.today; N.today = t; if (was) N.day = t; NU.render(); } }, 60000);
@@ -586,12 +628,29 @@ q("#nuPreview").addEventListener("click", async ev => {
 });
 q("#nuManT").onclick = () => { q("#nuMan").hidden = !q("#nuMan").hidden; };
 q("#nuManX").onclick = () => { q("#nuMan").reset(); q("#nuMan").hidden = true; };
+let manBasis = "100";
+function manVals(){
+  const amt = +q("#nuMAmt").value || 0, k = manBasis === "100" ? amt / 100 : 1, raw = id => +q(id).value || 0;
+  let kcal = raw("#nuMK"); const p = raw("#nuMP"), c = raw("#nuMC"), f = raw("#nuMF"); if (!kcal) kcal = p * 4 + c * 4 + f * 9;
+  const naS = q("#nuMNa").value.trim();
+  return { amt, k, v: { kcal: r0(kcal * k), p: r1(p * k), c: r1(c * k), f: r1(f * k), na: naS === "" ? null : r0(+naS * k) }, empty: !p && !c && !f && kcal > 0 };
+}
+function manCalc(){
+  const { amt, v, empty } = manVals();
+  q("#nuMTot").textContent = nf(v.kcal);
+  q("#nuMSum").textContent = `${manBasis === "100" ? `${r1(amt)} g → ` : ""}P ${v.p} · C ${v.c} · F ${v.f}${v.na != null ? ` · Na ${nf(v.na)} mg` : ""}`;
+  q("#nuMWarn").hidden = !empty;
+}
+function setManBasis(m){ manBasis = m; qa("[data-mb]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mb === m))); q("#nuMAmtL").hidden = m !== "100";
+  qa(".nuMU").forEach(el => el.textContent = el.textContent.replace(/ \/ 100 g$/, "") + (m === "100" ? " / 100 g" : "")); manCalc(); }
+qa("[data-mb]").forEach(b => b.onclick = () => setManBasis(b.dataset.mb));
+q("#nuMan").addEventListener("input", manCalc);
 q("#nuMan").onsubmit = async ev => {
   ev.preventDefault(); const name = q("#nuMName").value.trim(); if (!name) return;
-  const p = +q("#nuMP").value || 0, c = +q("#nuMC").value || 0, f = +q("#nuMF").value || 0; let k = +q("#nuMK").value || 0; if (!k) k = p * 4 + c * 4 + f * 9;
-  const na = q("#nuMNa").value.trim();
-  try { await addEntries([{ name, kcal: k, p, c, f, na: na === "" ? null : +na, src: "manual" }]); toast(`Added ${name}`); q("#nuMan").reset(); q("#nuMan").hidden = true; } catch {}
+  const { amt, v } = manVals(); if (manBasis === "100" && !amt) { toast("Enter how much you ate."); return; }
+  try { await addEntries([{ name, serving: manBasis === "100" ? `${r1(amt)} g` : "", ...v, src: "manual" }]); toast(`Added ${name} · ${nf(v.kcal)} kcal`); q("#nuMan").reset(); q("#nuMAmt").value = 100; manCalc(); q("#nuMan").hidden = true; } catch {}
 };
+manCalc();
 
 /* ---------- packaged food: label (any pack) or barcode (Open Food Facts + your library) ---------- */
 let zxP = null;
