@@ -424,6 +424,11 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
       <div id="syncSetup"><div class="empty">Loading…</div></div>
     </div>
     <div class="card">
+      <div class="card-h"><h2>Data check: steps today</h2><button class="btn" id="dcRun" type="button">Check now</button></div>
+      <p class="small" style="margin:0 0 10px">Shows every step record that has reached the dashboard today, per device. Compare with the Health app → Steps → <b>Show All Data</b> / <b>Data Sources</b>.</p>
+      <div id="dcOut"><div class="empty small">Tap “Check now”.</div></div>
+    </div>
+    <div class="card">
       <div class="card-h"><h2>Reading reports with Claude</h2><span class="hint" id="akeyState"></span></div>
       <p class="small" style="margin:0 0 10px">Uploaded reports are read by Claude through your own Anthropic API key. The key is saved in your private database (only your account can read it) and is sent only to Anthropic. Create one at console.anthropic.com → API keys.</p>
       <div class="row"><input type="password" id="akey" placeholder="sk-ant-…" autocomplete="off" style="flex:1 1 260px"><button class="btn primary" id="akeySave">Save key</button><button class="btn" id="akeyTest">Test</button></div>
@@ -1481,12 +1486,33 @@ async function renderSettings(){
   wireCopy(box);
   $("#rotKey").onclick = async () => { const b = $("#rotKey"); b.disabled = true; try { await SB.from("ingest_keys").delete().eq("user_id", S.uid); await createKey(); } catch (e) { b.disabled = false; } };
 }
+async function dataCheck(){
+  const out = $("#dcOut"); out.innerHTML = `<div class="empty small">Checking…</div>`;
+  const d = todayISO();
+  const { data, error } = await SB.from("health_samples").select("src,ts,v").eq("kind", "steps").eq("day", d).limit(5000);
+  if (error) { out.innerHTML = `<div class="small" style="color:var(--bad)">${esc(error.message)}</div>`; return; }
+  const hm = t => String(t).slice(11, 16);
+  const by = {};
+  for (const x of data) { const o = by[x.src] ||= { n: 0, sum: 0, first: "99", last: "", hours: {} }; o.n++; o.sum += Number(x.v); const t = hm(x.ts); if (t < o.first) o.first = t; if (t > o.last) o.last = t; const h = String(x.ts).slice(11, 13); o.hours[h] = (o.hours[h] || 0) + Number(x.v); }
+  const hrs = {}; for (const o of Object.values(by)) for (const [h, v] of Object.entries(o.hours)) hrs[h] = Math.max(hrs[h] || 0, v);
+  const merged = Object.values(hrs).reduce((a, b) => a + b, 0);
+  const shown = S.activity[d]?.s;
+  const last = S.sync.lastUsed;
+  out.innerHTML = data.length ? `
+    <div class="tbl-wrap"><table class="mx"><thead><tr><th>Device</th><th>Records</th><th>Steps</th><th>First</th><th>Latest</th></tr></thead><tbody>
+      ${Object.entries(by).sort((a, b) => b[1].sum - a[1].sum).map(([src, o]) => `<tr><td>${esc(src)}</td><td class="c">${o.n}</td><td class="c">${Math.round(o.sum).toLocaleString("en-IN")}</td><td class="c">${o.first}</td><td class="c">${o.last}</td></tr>`).join("")}
+    </tbody></table></div>
+    <div class="small" style="margin-top:8px">Combined hour by hour: <b class="mono">${Math.round(merged).toLocaleString("en-IN")}</b> · shown on dashboard: <b class="mono">${shown != null ? shown.toLocaleString("en-IN") : "—"}</b> · last delivery ${ago(last)}</div>
+    <div class="small muted" style="margin-top:4px">If a device's <b>Latest</b> time is well before now, newer records from it haven't reached the dashboard yet. If a device you use is missing, it isn't being sent.</div>`
+    : `<div class="small">No individual step records received for today${last ? ` (last delivery ${ago(last)})` : ""}. Either today isn't included in the automation's date range, or Aggregate data is on (then only a daily total arrives: ${shown != null ? shown.toLocaleString("en-IN") : "none yet"}).</div>`;
+}
 async function createKey(){
   const bytes = crypto.getRandomValues(new Uint8Array(24)); const key = "hl_" + Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
   const { error } = await SB.from("ingest_keys").insert({ key, user_id: S.uid });
   if (error) { toastMsg("#mkMsg", "Couldn't create the key: " + esc(error.message), true); return; }
   await loadAll(); renderSettings();
 }
+$("#dcRun").onclick = () => dataCheck();
 $("#akeySave").onclick = async () => {
   const v = $("#akey").value.trim(); if (!/^sk-ant-/.test(v)) return toastMsg("#akeyMsg", "That doesn't look like an Anthropic key (it starts with sk-ant-).", true);
   const { error } = await SB.from("user_settings").upsert({ user_id: S.uid, anthropic_key: v, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
