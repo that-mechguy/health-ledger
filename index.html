@@ -370,7 +370,7 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
       <div class="grid g2">
         <div class="card" style="background:var(--surface-2);border:0">
           <h3>Full Health export</h3>
-          <p class="small muted">Brings in years of steps, active energy, resting heart rate and weight in one go.</p>
+          <p class="small muted">Brings in years of steps, sleep, heart rate, HRV, blood pressure, blood oxygen, breathing rate and weight in one go. Safe to re-upload: days are updated, not duplicated.</p>
           <ol class="small" style="padding-left:18px;margin:6px 0 10px">
             <li>Health app → your photo (top right) → <b>Export All Health Data</b>.</li>
             <li>Save <b>export.zip</b> to Files (a laptop is faster for big exports).</li>
@@ -939,12 +939,25 @@ $("#hkFile").onchange = async e => {
   const since = $("#hkSince").value || "2000-01-01";
   const prog = $("#hkProg"), bar = prog.querySelector("i"); prog.hidden = false; bar.style.width = "0%";
   toastMsg("#hkMsg", "Reading your Health export… large files take a minute.");
-  const agg = {}; // type|date|source -> {sum,n}
-  const re = /<Record type="HKQuantityTypeIdentifier(StepCount|ActiveEnergyBurned|RestingHeartRate|BodyMass|BloodPressureSystolic|BloodPressureDiastolic|OxygenSaturation)"([^>]*)>/g;
-  const attr = (s, n) => { const m = s.match(new RegExp(n + '="([^"]*)"')); return m ? m[1] : null; };
-  const scan = chunk => { let m; re.lastIndex = 0; while ((m = re.exec(chunk))) { const a = m[2]; const sd = attr(a, "startDate"); if (!sd) continue; const d = sd.slice(0,10); if (d < since) continue;
-      let v = parseFloat(attr(a, "value")); if (isNaN(v)) continue; const unit = attr(a, "unit") || ""; if (m[1] === "BodyMass" && unit === "lb") v *= 0.453592; if (m[1] === "ActiveEnergyBurned" && unit === "kJ") v /= 4.184;
-      const key = m[1] + "|" + d + "|" + (attr(a, "sourceName") || ""); const o = agg[key] ||= {sum:0, n:0, last:0}; o.sum += v; o.n++; o.last = v; } };
+  const agg = {}; // type|date|source -> {sum,n,min,max,last,lastTs}
+  const QT = "StepCount|ActiveEnergyBurned|RestingHeartRate|BodyMass|BloodPressureSystolic|BloodPressureDiastolic|OxygenSaturation|HeartRate|HeartRateVariabilitySDNN|RespiratoryRate";
+  const re = new RegExp('<Record type="HK(?:QuantityTypeIdentifier(' + QT + ')|CategoryTypeIdentifier(SleepAnalysis))"([^>]*)>', "g");
+  const attr = (s, n) => { const m = s.match(new RegExp(" " + n + '="([^"]*)"')); return m ? m[1] : null; };
+  const toDate = t => new Date(t.replace(" ", "T").replace(/ ([+-]\d{2})(\d{2})$/, "$1:$2"));
+  const add = (key, v, ts) => { const o = agg[key] ||= { sum: 0, n: 0, min: Infinity, max: -Infinity, last: 0, lastTs: "" }; o.sum += v; o.n++; if (v < o.min) o.min = v; if (v > o.max) o.max = v; if (ts >= o.lastTs) { o.last = v; o.lastTs = ts; } };
+  const scan = chunk => { let m; re.lastIndex = 0; while ((m = re.exec(chunk))) {
+      const a = m[3]; const sd = attr(a, "startDate"); if (!sd) continue; const src = attr(a, "sourceName") || "";
+      if (m[2] === "SleepAnalysis") {
+        const val = attr(a, "value") || ""; if (/InBed|Awake/.test(val)) continue;
+        const ed = attr(a, "endDate"); if (!ed) continue; const d = ed.slice(0, 10); if (d < since) continue;
+        const h = (toDate(ed) - toDate(sd)) / 3600e3; if (!(h > 0 && h < 16)) continue;
+        add("Sleep|" + d + "|" + src, h, ed); continue;
+      }
+      const t = m[1]; const d = sd.slice(0, 10); if (d < since) continue;
+      let v = parseFloat(attr(a, "value")); if (isNaN(v)) continue; const unit = attr(a, "unit") || "";
+      if (t === "BodyMass" && unit === "lb") v *= 0.453592; if (t === "ActiveEnergyBurned" && unit === "kJ") v /= 4.184;
+      if (t === "OxygenSaturation" && v <= 1) v *= 100;
+      add(t + "|" + d + "|" + src, v, sd); } };
   try {
     let carry = "";
     const feed = text => { const t = carry + text; const i = t.lastIndexOf(">"); if (i < 0) { carry = t; return; } scan(t.slice(0, i+1)); carry = t.slice(i+1); };
@@ -961,9 +974,21 @@ $("#hkFile").onchange = async e => {
     }
     // per day: steps & energy = the single source with the highest total (avoids iPhone + Watch double counting)
     const days = {};
-    const best = {}; for (const [k,o] of Object.entries(agg)) { const [t,d] = k.split("|"); const id = t + "|" + d; const avgT = t === "RestingHeartRate" || t === "OxygenSaturation", lastT = t === "BodyMass" || t.startsWith("BloodPressure"); const val = avgT ? o.sum/o.n : lastT ? o.last : o.sum; if (!(id in best) || (!avgT && !lastT && val > best[id])) best[id] = val; }
-    for (const [id,v] of Object.entries(best)) { const [t,d] = id.split("|"); const o = days[d] ||= {src:"apple-health"}; if (t === "StepCount") o.s = Math.round(v); else if (t === "ActiveEnergyBurned") o.k = Math.round(v); else if (t === "RestingHeartRate") o.h = Math.round(v); else if (t === "BodyMass") o.w = Math.round(v*10)/10; else if (t === "BloodPressureSystolic") o.bps = Math.round(v); else if (t === "BloodPressureDiastolic") o.bpd = Math.round(v); else if (t === "OxygenSaturation") o.o2 = Math.round((v <= 1 ? v*100 : v)*10)/10; }
-    const n = Object.keys(days).length; if (!n) throw new Error(`No steps found on or after ${fmtD(since)}.`);
+    const SUM = new Set(["StepCount", "ActiveEnergyBurned", "Sleep"]), LAST = new Set(["BodyMass", "BloodPressureSystolic", "BloodPressureDiastolic"]);
+    const byDay = {}; // type|day -> list of per-source aggregates
+    for (const [k, o] of Object.entries(agg)) { const [t, d] = k.split("|"); (byDay[t + "|" + d] ||= []).push(o); }
+    for (const [id, list] of Object.entries(byDay)) {
+      const [t, d] = id.split("|"); const o = days[d] ||= { src: "apple-health" };
+      if (SUM.has(t)) { const v = Math.max(...list.map(x => x.sum)); // highest device total, never added across devices
+        if (t === "StepCount") o.s = Math.round(v); else if (t === "ActiveEnergyBurned") o.k = Math.round(v); else o.sl = Math.round(v * 100) / 100; }
+      else if (LAST.has(t)) { const x = list.reduce((p, c) => c.lastTs > p.lastTs ? c : p); const v = x.last;
+        if (t === "BodyMass") o.w = Math.round(v * 10) / 10; else if (t === "BloodPressureSystolic") { o.bps = Math.round(v); o.bpat = x.lastTs; } else o.bpd = Math.round(v); }
+      else { const tot = list.reduce((p, c) => p + c.sum, 0), n = list.reduce((p, c) => p + c.n, 0), v = tot / n;
+        if (t === "RestingHeartRate") o.h = Math.round(v); else if (t === "OxygenSaturation") o.o2 = Math.round(v * 10) / 10;
+        else if (t === "HeartRateVariabilitySDNN") o.hrv = Math.round(v * 10) / 10; else if (t === "RespiratoryRate") o.rr = Math.round(v * 10) / 10;
+        else if (t === "HeartRate") { o.hra = Math.round(v); o.hrmin = Math.round(Math.min(...list.map(c => c.min))); o.hrmax = Math.round(Math.max(...list.map(c => c.max))); } }
+    }
+    const n = Object.keys(days).length; if (!n) throw new Error(`No Health records found on or after ${fmtD(since)}.`);
     toastMsg("#hkMsg", `Found ${n} days. Saving…`);
     await mergeActivity(days);
     toastMsg("#hkMsg", `Imported ${n} days from Apple Health.`); bar.style.width = "100%";
@@ -1101,7 +1126,7 @@ async function loadAll(){
 /* ---- activity writes (Apple export import + manual log) ---- */
 async function mergeActivity(days){
   if (!SB || !S.uid) throw { message: "Not signed in" };
-  const map = { s: "steps", k: "active_kcal", h: "resting_hr", hrv: "hrv_ms", w: "weight_kg", sl: "sleep_h", bps: "bp_sys", bpd: "bp_dia", bpat: "bp_at", o2: "spo2" };
+  const map = { s: "steps", k: "active_kcal", h: "resting_hr", hrv: "hrv_ms", w: "weight_kg", sl: "sleep_h", bps: "bp_sys", bpd: "bp_dia", bpat: "bp_at", o2: "spo2", hra: "hr_avg", hrmin: "hr_min", hrmax: "hr_max", rr: "resp_rate" };
   const groups = {};
   for (const [d, v] of Object.entries(days)) {
     const row = { user_id: S.uid, day: d, source: v.src || "manual", updated_at: new Date().toISOString() };
