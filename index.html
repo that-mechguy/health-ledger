@@ -1,0 +1,1432 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Health Ledger</title>
+<meta name="description" content="Personal health dashboard: blood tests, body scans and Apple Health activity.">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#EDF1EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1412" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Health Ledger">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+/* Layout: sticky header + tab rail; each tab is a single column of cards on phone, 2–3 col grid on laptop. Status (ok/borderline/out) always carries an icon + word, never colour alone. */
+:root{
+  --bg:#EDF1EF; --surface:#FFFFFF; --surface-2:#F4F7F5; --ink:#14201C; --ink-2:#465651; --muted:#74847F;
+  --line:#D6DFDB; --accent:#2D4C9E; --accent-soft:#E2E8F6; --accent-ink:#FFFFFF;
+  --ok:#2A7A4B; --ok-bg:#E1F1E7; --warn:#9A6200; --warn-bg:#FAEFD6; --bad:#B03728; --bad-bg:#F8E1DC;
+  --info:#56657F; --info-bg:#E8ECF2; --band:rgba(42,122,75,.10); --grid:#E3E9E6;
+  --f-display:"Familjen Grotesk","Helvetica Neue",Arial,sans-serif;
+  --f-body:"Public Sans",-apple-system,"Segoe UI",Roboto,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --r:12px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1412; --surface:#161E1B; --surface-2:#1B2521; --ink:#E4ECE8; --ink-2:#A7B6B0; --muted:#7C8C86;
+  --line:#28342F; --accent:#93A9F0; --accent-soft:#1E2945; --accent-ink:#0E1412;
+  --ok:#62C48F; --ok-bg:#15301F; --warn:#E4AA42; --warn-bg:#33270E; --bad:#F2806F; --bad-bg:#3A1C17;
+  --info:#A3B0C6; --info-bg:#1F2733; --band:rgba(98,196,143,.12); --grid:#222D29; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E1412; --surface:#161E1B; --surface-2:#1B2521; --ink:#E4ECE8; --ink-2:#A7B6B0; --muted:#7C8C86;
+  --line:#28342F; --accent:#93A9F0; --accent-soft:#1E2945; --accent-ink:#0E1412;
+  --ok:#62C48F; --ok-bg:#15301F; --warn:#E4AA42; --warn-bg:#33270E; --bad:#F2806F; --bad-bg:#3A1C17;
+  --info:#A3B0C6; --info-bg:#1F2733; --band:rgba(98,196,143,.12); --grid:#222D29; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.5;margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:0 64px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;letter-spacing:-.01em}
+h2{font-size:1.25rem}
+h3{font-size:1.02rem}
+.mono,.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+a{color:var(--accent)}
+
+/* header */
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--bg);border-bottom:1px solid var(--line)}
+.top-in{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:14px 0;display:flex;flex-direction:column;gap:10px}
+.brand{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand h1{font-size:1.35rem}
+.brand .sub{color:var(--muted);font-size:.82rem}
+.tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;margin-inline:-4px}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:0 0 auto;border:0;background:none;padding:10px 12px 11px;border-bottom:2px solid transparent;color:var(--ink-2);font-weight:600;font-size:.9rem;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tab:hover{color:var(--ink)}
+
+section.view{display:flex;flex-direction:column;gap:18px;padding-top:20px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;min-width:0}
+.card-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.card-h .hint{color:var(--muted);font-size:.8rem}
+.grid{display:grid;gap:18px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr))}
+.eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+.muted{color:var(--muted)}
+.small{font-size:.82rem}
+.notice{background:var(--accent-soft);border-radius:10px;padding:12px 14px;font-size:.88rem}
+.empty{color:var(--muted);padding:18px 0;font-size:.9rem}
+
+/* chips */
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:.74rem;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap;line-height:1.6}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chip.border{background:var(--warn-bg);color:var(--warn)}
+.chip.out{background:var(--bad-bg);color:var(--bad)}
+.chip.info{background:var(--info-bg);color:var(--info)}
+.chip.stale{background:var(--surface-2);color:var(--muted);border:1px dashed var(--line)}
+.chip svg{width:11px;height:11px}
+.pill-btn{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:5px 12px;font-size:.82rem;font-weight:600;color:var(--ink-2)}
+.pill-btn[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:9px;padding:8px 14px;font-weight:600;font-size:.88rem;display:inline-flex;align-items:center;gap:6px}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* hero */
+.hero{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:center}
+@media (max-width:640px){.hero{grid-template-columns:1fr;justify-items:center;text-align:center}}
+.ring{position:relative;width:190px;height:190px}
+.ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring .val{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring .big{font-family:var(--f-display);font-size:3.4rem;font-weight:700;line-height:1;letter-spacing:-.03em}
+.ring .of{font-family:var(--f-mono);font-size:.78rem;color:var(--muted)}
+.ring .band{font-weight:700;font-size:.9rem;margin-top:4px}
+.hero-r{display:flex;flex-direction:column;gap:14px;min-width:0;width:100%}
+.subs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:420px){.subs{grid-template-columns:1fr}}
+.sub-s{background:var(--surface-2);border-radius:10px;padding:10px 12px;text-align:left}
+.sub-s .k{font-size:.76rem;color:var(--muted);font-weight:600}
+.sub-s .v{font-family:var(--f-display);font-size:1.6rem;font-weight:700}
+.sub-s .w{font-size:.72rem;color:var(--muted)}
+.hero-meta{font-size:.84rem;color:var(--ink-2);text-align:left}
+
+/* system scores */
+.sys{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:10px}
+.sys button{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:6px;padding:12px;border-radius:10px;background:var(--surface-2);border:1px solid transparent}
+.sys button:hover,.sys button:focus-visible{border-color:var(--accent)}
+.sys .t{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-weight:600;font-size:.9rem}
+.sys .t .mono{font-size:1.05rem;font-weight:600}
+.bar{height:6px;border-radius:99px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:99px}
+.sys .f{font-size:.75rem;color:var(--muted)}
+
+/* list rows */
+.lrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-top:1px solid var(--line);align-items:center}
+.lrow:first-child{border-top:0}
+.lrow .n{font-weight:600;font-size:.92rem}
+.lrow .d{font-size:.78rem;color:var(--muted);grid-column:1/-1}
+.lrow .v{font-family:var(--f-mono);font-size:.92rem;text-align:right;white-space:nowrap}
+
+/* results */
+.res-cat{display:flex;flex-direction:column;gap:0}
+.mrow{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 120px;gap:6px 14px;padding:11px 0;border-top:1px solid var(--line);align-items:center;cursor:pointer}
+.mrow:first-of-type{border-top:0}
+.mrow:hover .mn{color:var(--accent)}
+@media (max-width:620px){.mrow{grid-template-columns:minmax(0,1fr) auto}.mrow .rb{grid-column:1/-1}}
+.mn{font-weight:600;font-size:.9rem}
+.mmeta{font-size:.74rem;color:var(--muted)}
+.mval{font-family:var(--f-mono);font-size:1rem;font-weight:600;text-align:right;white-space:nowrap}
+.mval small{font-size:.72rem;color:var(--muted);font-weight:400}
+.delta{font-family:var(--f-mono);font-size:.74rem;white-space:nowrap}
+.delta.better{color:var(--ok)} .delta.worse{color:var(--bad)} .delta.flat{color:var(--muted)}
+.rb svg{width:100%;height:22px;display:block}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.toolbar input[type=search]{flex:1 1 200px;min-width:0;border:1px solid var(--line);border-radius:9px;padding:8px 12px;background:var(--surface)}
+
+/* history */
+.hist-layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:18px}
+@media (max-width:820px){.hist-layout{grid-template-columns:1fr}}
+.plist{display:flex;flex-direction:column;max-height:520px;overflow:auto;gap:2px}
+@media (max-width:820px){.plist{flex-direction:row;overflow-x:auto;max-height:none;padding-bottom:4px}}
+.plist button{all:unset;cursor:pointer;padding:7px 10px;border-radius:8px;font-size:.86rem;display:flex;justify-content:space-between;gap:8px;align-items:center;white-space:nowrap}
+.plist button[aria-pressed="true"]{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.plist button:hover{background:var(--surface-2)}
+.dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.dot.ok{background:var(--ok)}.dot.border{background:var(--warn)}.dot.out{background:var(--bad)}.dot.info{background:var(--info)}
+.chart{position:relative;width:100%}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart text{fill:var(--muted);font-family:var(--f-mono);font-size:11px}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);font-size:.78rem;padding:6px 9px;border-radius:7px;white-space:nowrap;transform:translate(-50%,calc(-100% - 10px));opacity:0;transition:opacity .12s;z-index:5}
+.tip b{font-family:var(--f-mono)}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table.mx{border-collapse:separate;border-spacing:0;font-size:.82rem;min-width:100%}
+table.mx th,table.mx td{padding:8px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+table.mx th:first-child,table.mx td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);z-index:1;max-width:190px;overflow:hidden;text-overflow:ellipsis}
+table.mx thead th{font-size:.72rem;color:var(--muted);font-weight:600;background:var(--surface-2)}
+table.mx thead th:first-child{background:var(--surface-2)}
+table.mx td.c{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+table.mx td.c span{display:inline-block;padding:1px 7px;border-radius:6px}
+td.c .ok{background:var(--ok-bg);color:var(--ok)} td.c .border{background:var(--warn-bg);color:var(--warn)} td.c .out{background:var(--bad-bg);color:var(--bad)} td.c .info{color:var(--ink-2)}
+table.mx tbody tr{cursor:pointer}
+table.mx tbody tr:hover td{background:var(--surface-2)}
+
+/* body */
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr));gap:10px}
+.tile{background:var(--surface-2);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:4px}
+.tile .k{font-size:.76rem;color:var(--muted);font-weight:600}
+.tile .v{font-family:var(--f-mono);font-size:1.25rem;font-weight:600}
+.tile .v small{font-size:.75rem;color:var(--muted);font-weight:400}
+.tile .r{font-size:.72rem;color:var(--muted)}
+
+/* activity */
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:10px}
+details.howto{border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--surface-2)}
+details.howto summary{cursor:pointer;font-weight:600}
+details.howto ol{padding-left:20px;margin:8px 0}
+textarea,input[type=text],input[type=number],input[type=date],select{border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--surface);min-width:0}
+textarea{width:100%;min-height:90px;font-family:var(--f-mono);font-size:.82rem}
+.progress{height:6px;background:var(--line);border-radius:99px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+
+/* reports */
+.rep{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:6px 16px;padding:14px 0;border-top:1px solid var(--line);align-items:center}
+.rep:first-child{border-top:0}
+.rep .date{font-family:var(--f-mono);font-size:.82rem;line-height:1.3}
+.rep .date b{display:block;font-family:var(--f-display);font-size:1.3rem;letter-spacing:-.02em}
+.rep .t{font-weight:600}
+.rep .m{font-size:.78rem;color:var(--muted)}
+.rep .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:560px){.rep{grid-template-columns:72px minmax(0,1fr)}.rep .acts{grid-column:1/-1;justify-content:flex-start}}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;display:flex;flex-direction:column;gap:8px;align-items:center}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+
+/* review sheet */
+.sheet-bg{position:fixed;inset:0;background:rgba(10,15,13,.55);z-index:50;display:flex;align-items:flex-end;justify-content:center}
+@media (min-width:760px){.sheet-bg{align-items:center}}
+.sheet{background:var(--surface);width:min(900px,100%);max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:14px}
+@media (min-width:760px){.sheet{border-radius:16px}}
+.rv-table{width:100%;border-collapse:collapse;font-size:.84rem}
+.rv-table th{font-size:.72rem;color:var(--muted);text-align:left;padding:6px 4px;font-weight:600}
+.rv-table td{padding:4px;border-top:1px solid var(--line)}
+.rv-table input{width:100%;padding:5px 7px;font-size:.84rem}
+.rv-table td.x{width:34px}
+.iconbtn{border:0;background:none;color:var(--muted);padding:4px 8px;border-radius:6px}
+.iconbtn:hover{color:var(--bad);background:var(--bad-bg)}
+.answer{white-space:pre-wrap;font-size:.9rem;background:var(--surface-2);border-radius:10px;padding:12px 14px;min-height:0}
+.answer:empty{display:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+html{-webkit-text-size-adjust:100%}
+body{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.brand-r{display:flex;align-items:center;gap:8px}
+.refresh{border:1px solid var(--line);background:var(--surface);border-radius:99px;width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;color:var(--ink-2)}
+.refresh svg{width:16px;height:16px}
+.refresh.spin svg{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.gate{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px 16px;overflow:auto}
+.gate-card{width:min(420px,100%);display:flex;flex-direction:column;gap:12px}
+.gate-card label{display:flex;flex-direction:column;gap:4px;font-size:.84rem;font-weight:600}
+.gate-card input{width:100%}
+.kv{display:grid;grid-template-columns:minmax(0,130px) minmax(0,1fr) auto;gap:8px 10px;align-items:center;font-size:.84rem}
+.kv .kk{font-weight:600}
+.kv code{font-family:var(--f-mono);background:var(--surface-2);padding:5px 8px;border-radius:6px;overflow-wrap:anywhere;font-size:.76rem;min-width:0}
+@media (max-width:560px){.kv{grid-template-columns:minmax(0,1fr) auto}.kv .kk{grid-column:1/-1;color:var(--muted);margin-top:4px}}
+ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6px;font-size:.88rem}
+.sync-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <h1>Health Ledger</h1>
+      <div class="brand-r"><span class="sub" id="lastUpdated">Loading your records…</span><button class="refresh" id="refreshBtn" title="Refresh" aria-label="Refresh data"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"/><path d="M13.5 2.5v3h-3"/></svg></button></div>
+    </div>
+    <nav class="tabs" role="tablist" id="tabs">
+      <button class="tab" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+      <button class="tab" role="tab" data-tab="results" aria-selected="false">Latest results</button>
+      <button class="tab" role="tab" data-tab="history" aria-selected="false">History</button>
+      <button class="tab" role="tab" data-tab="body" aria-selected="false">Body scan</button>
+      <button class="tab" role="tab" data-tab="activity" aria-selected="false">Activity</button>
+      <button class="tab" role="tab" data-tab="reports" aria-selected="false">Reports</button>
+      <button class="tab" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="globalNotice" class="notice" style="margin-top:16px" hidden></div>
+
+  <!-- OVERVIEW -->
+  <section class="view" id="v-overview">
+    <div class="card">
+      <div class="hero">
+        <div class="ring" id="ring"></div>
+        <div class="hero-r">
+          <div>
+            <div class="eyebrow">Overall health rating</div>
+            <h2 id="heroHead" style="font-size:1.5rem;margin-top:2px">Your records will appear here</h2>
+          </div>
+          <div class="subs" id="subScores"></div>
+          <div class="hero-meta" id="heroMeta"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Score by body system</h2><span class="hint">Latest value of each marker · tap a system to see its results</span></div>
+      <div class="sys" id="sysScores"><div class="empty">No blood tests yet. Upload one from the Reports tab.</div></div>
+    </div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Needs attention</h2><span class="hint">Out of range in your latest test</span></div><div id="attn"><div class="empty">Nothing flagged yet.</div></div></div>
+      <div class="card"><div class="card-h"><h2>Moving the right way</h2><span class="hint">Better than the previous test</span></div><div id="better"><div class="empty">Needs two tests to compare.</div></div></div>
+    </div>
+    <div class="grid g2">
+      <div class="card"><div class="card-h"><h2>Due for a retest</h2><span class="hint">Last checked over 12 months ago</span></div><div id="due"><div class="empty">All markers are recent.</div></div></div>
+      <div class="card">
+        <div class="card-h"><h2>Ask about your results</h2><span class="hint">Claude reads your latest values and trends</span></div>
+        <div class="row" style="margin-bottom:10px">
+          <input type="text" id="askQ" placeholder="e.g. What should I fix first?" style="flex:1 1 220px">
+          <button class="btn primary" id="askBtn">Ask</button>
+        </div>
+        <div class="row" id="askSugg" style="margin-bottom:10px"></div>
+        <div class="answer" id="askOut" aria-live="polite"></div>
+        <p class="small muted" id="askNote" style="margin:8px 0 0">General information, not a diagnosis. Take changes to medication or supplements to your doctor.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <section class="view" id="v-results" hidden>
+    <div class="toolbar">
+      <input type="search" id="resSearch" placeholder="Search a marker, e.g. vitamin, ALT, HbA1c">
+      <button class="pill-btn" id="resFlagged" aria-pressed="false">Only out of range</button>
+      <button class="pill-btn" id="resAll" aria-pressed="false">Include ratios & sub-counts</button>
+    </div>
+    <div id="resBody" class="grid g2"></div>
+  </section>
+
+  <!-- HISTORY -->
+  <section class="view" id="v-history" hidden>
+    <div class="row" id="histCats"></div>
+    <div class="card">
+      <div class="hist-layout">
+        <div class="plist" id="histList"></div>
+        <div style="min-width:0">
+          <div class="card-h" style="margin-bottom:6px"><div><h2 id="histTitle">—</h2><div class="small muted" id="histSub"></div></div><div id="histChip"></div></div>
+          <div class="chart" id="histChart"></div>
+          <p class="small muted" id="histNote" style="margin:8px 0 0"></p>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2 id="mxTitle">All tests side by side</h2><span class="hint">Oldest → newest · tap a row to chart it</span></div>
+      <div class="tbl-wrap"><table class="mx" id="mx"></table></div>
+    </div>
+  </section>
+
+  <!-- BODY -->
+  <section class="view" id="v-body" hidden>
+    <div class="card" id="bodyHero"></div>
+    <div class="card"><div class="card-h"><h2>Body composition</h2><span class="hint" id="bodyDate"></span></div><div class="tiles" id="bodyTiles"></div></div>
+    <div class="card"><div class="card-h"><h2>Weight over time</h2><span class="hint">Scale readings from scans and Apple Health; self-reported from lab forms</span></div><div class="chart" id="wtChart"></div><div class="row small muted" id="wtLegend" style="margin-top:8px"></div></div>
+    <div class="card"><div class="card-h"><h2>Scan history</h2><span class="hint">Each body scan you upload adds a column</span></div><div class="tbl-wrap"><table class="mx" id="bodyMx"></table></div></div>
+  </section>
+
+  <!-- ACTIVITY -->
+  <section class="view" id="v-activity" hidden>
+    <div class="card" id="syncCard"></div>
+    <div class="card">
+      <div class="card-h"><h2>Steps</h2>
+        <div class="row" id="actRange">
+          <button class="pill-btn" data-r="7" aria-pressed="false">7 days</button>
+          <button class="pill-btn" data-r="30" aria-pressed="true">30 days</button>
+          <button class="pill-btn" data-r="90" aria-pressed="false">90 days</button>
+          <button class="pill-btn" data-r="365" aria-pressed="false">1 year</button>
+        </div>
+      </div>
+      <div class="stat-row" id="actStats"></div>
+      <div class="chart" id="stepChart" style="margin-top:16px"></div>
+      <div class="small muted" id="actNote" style="margin-top:6px"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Sleep &amp; heart</h2><span class="hint">Last 90 days, from Apple Health</span></div>
+      <div class="stat-row" id="vitStats"></div>
+      <div class="grid g2" style="margin-top:16px">
+        <div style="min-width:0"><div class="eyebrow">Sleep, hours per night</div><div class="chart" id="sleepChart"></div></div>
+        <div style="min-width:0"><div class="eyebrow">Resting heart rate, bpm</div><div class="chart" id="rhrChart"></div></div>
+      </div>
+    </div>
+    <div class="card"><div class="card-h"><h2>Monthly average</h2><span class="hint">Daily steps, averaged per month</span></div><div class="chart" id="monthChart"></div></div>
+    <div class="card" id="healthImport">
+      <div class="card-h"><h2>Fill in older history</h2><span class="hint">Automatic sync covers new days; use these for the past</span></div>
+      <div class="grid g2">
+        <div class="card" style="background:var(--surface-2);border:0">
+          <h3>Full Health export</h3>
+          <p class="small muted">Brings in years of steps, active energy, resting heart rate and weight in one go.</p>
+          <ol class="small" style="padding-left:18px;margin:6px 0 10px">
+            <li>Health app → your photo (top right) → <b>Export All Health Data</b>.</li>
+            <li>Save <b>export.zip</b> to Files (a laptop is faster for big exports).</li>
+            <li>Choose the file below.</li>
+          </ol>
+          <div class="row"><label class="small">From <input type="date" id="hkSince" value="2024-01-01"></label></div>
+          <div class="row" style="margin-top:8px"><input type="file" id="hkFile" accept=".zip,.xml,application/zip,text/xml,application/xml"></div>
+          <div class="progress" style="margin-top:10px" hidden id="hkProg"><i></i></div>
+          <div class="small" id="hkMsg" style="margin-top:6px"></div>
+        </div>
+        <div class="card" style="background:var(--surface-2);border:0">
+          <h3>Log a day by hand</h3>
+          <p class="small muted">For a day the sync missed.</p>
+          <div class="grid" style="gap:8px">
+            <label class="small">Date<br><input type="date" id="manDate" style="width:100%"></label>
+            <label class="small">Steps<br><input type="number" id="manSteps" min="0" step="1" style="width:100%" placeholder="10000"></label>
+            <label class="small">Weight, kg (optional)<br><input type="number" id="manWt" min="0" step="0.1" style="width:100%"></label>
+          </div>
+          <div class="row" style="margin-top:8px"><button class="btn" id="manBtn">Save day</button><span class="small" id="manMsg"></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- REPORTS -->
+  <section class="view" id="v-reports" hidden>
+    <div class="card" id="uploadCard">
+      <div class="card-h"><h2>Add a report</h2><span class="hint">Blood test or body-scan PDF, or a photo of one</span></div>
+      <div class="drop" id="drop">
+        <div style="font-weight:600">Drop a PDF here or choose a file</div>
+        <div class="small muted">Claude reads the values, you check them, then they join your history. The original file is kept here too.</div>
+        <div class="row" style="justify-content:center">
+          <input type="file" id="upFile" accept="application/pdf,image/jpeg,image/png,image/webp">
+          <button class="btn" id="manualBtn" type="button">Enter values by hand</button>
+        </div>
+        <div class="progress" style="width:min(380px,100%)" hidden id="upProg"><i></i></div>
+        <div class="small" id="upMsg" aria-live="polite"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>All reports</h2><span class="hint" id="repCount"></span></div>
+      <div id="repList"><div class="empty">Your reports will be listed here, newest first.</div></div>
+    </div>
+  </section>
+  <!-- SETTINGS -->
+  <section class="view" id="v-settings" hidden>
+    <div class="card">
+      <div class="card-h"><h2>Apple Health sync</h2><span class="hint" id="syncHint"></span></div>
+      <div id="syncSetup"><div class="empty">Loading…</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Reading reports with Claude</h2><span class="hint" id="akeyState"></span></div>
+      <p class="small" style="margin:0 0 10px">Uploaded reports are read by Claude through your own Anthropic API key. The key is saved in your private database (only your account can read it) and is sent only to Anthropic. Create one at console.anthropic.com → API keys.</p>
+      <div class="row"><input type="password" id="akey" placeholder="sk-ant-…" autocomplete="off" style="flex:1 1 260px"><button class="btn primary" id="akeySave">Save key</button><button class="btn" id="akeyTest">Test</button></div>
+      <div class="small" id="akeyMsg" style="margin-top:6px"></div>
+      <label class="small" for="about" style="display:block;margin-top:14px;font-weight:600">About you <span class="muted" style="font-weight:400">(age, diet, lifestyle; gives Claude context when answering)</span></label>
+      <textarea id="about" style="font-family:var(--f-body);font-size:.88rem;min-height:70px;margin-top:4px" placeholder="e.g. 29, male, vegetarian, desk job, gym 3×/week"></textarea>
+      <div class="row" style="margin-top:6px"><button class="btn" id="aboutSave">Save</button><span class="small" id="aboutMsg"></span></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Account</h2></div>
+      <div class="small" id="acctInfo" style="margin-bottom:10px"></div>
+      <div class="row"><button class="btn" id="signOut">Sign out</button></div>
+    </div>
+  </section>
+</main>
+
+<div id="sheetRoot"></div>
+<div class="gate" id="gate" hidden>
+  <div class="gate-card card">
+    <div>
+      <div class="eyebrow">Your private</div>
+      <h1 style="font-size:1.8rem">Health Ledger</h1>
+    </div>
+    <form id="gateCfg" hidden class="gate-card" style="width:100%">
+      <p class="small" style="margin:0">Connect this app to your Supabase project once. Find both values in Supabase → Project Settings → API. (Or put them in <span class="mono">config.js</span> so no device ever asks.)</p>
+      <label>Project URL<input type="url" id="cfgUrl" placeholder="https://xxxx.supabase.co" required></label>
+      <label>Anon public key<input type="text" id="cfgKey" placeholder="eyJhbGciOi…" required></label>
+      <button class="btn primary" type="submit">Connect</button>
+    </form>
+    <form id="gateLogin" hidden class="gate-card" style="width:100%">
+      <label>Email<input type="email" id="lgEmail" autocomplete="username" required></label>
+      <label>Password<input type="password" id="lgPass" autocomplete="current-password" minlength="8" required></label>
+      <button class="btn primary" type="submit" id="lgBtn">Sign in</button>
+      <button class="btn" type="button" id="lgCreate">Create my account (first time only)</button>
+      <div class="small" id="lgMsg"></div>
+    </form>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ---------- reference catalogue (names only; your values live in the database) ---------- */
+const CATS = {
+  lipids:{name:"Heart & lipids",w:1.5}, liver:{name:"Liver & pancreas",w:1.2}, sugar:{name:"Blood sugar",w:1.2},
+  kidney:{name:"Kidney & electrolytes",w:1}, vitamins:{name:"Vitamins & iron",w:1}, thyroid:{name:"Thyroid",w:.8},
+  hormones:{name:"Hormones",w:.8}, cbc:{name:"Blood count",w:.8}, other:{name:"Inflammation & other",w:.7}
+};
+const CATALOG = [
+ ["tc","Total Cholesterol","lipids"],["tg","Triglycerides","lipids"],["hdl","HDL Cholesterol","lipids"],["ldl","LDL Cholesterol","lipids"],["vldl","VLDL Cholesterol","lipids"],["nonhdl","Non-HDL Cholesterol","lipids"],["tc_hdl","Total Chol / HDL Ratio","lipids"],["ldl_hdl","LDL / HDL Ratio","lipids"],["hdl_ldl","HDL / LDL Ratio","lipids"],["apob","Apolipoprotein B","lipids"],["lpa","Lipoprotein(a)","lipids"],
+ ["alt","ALT (SGPT)","liver"],["ast","AST (SGOT)","liver"],["ggt","GGT","liver"],["alp","Alkaline Phosphatase","liver"],["bili_t","Bilirubin, Total","liver"],["bili_d","Bilirubin, Direct","liver"],["bili_i","Bilirubin, Indirect","liver"],["protein","Total Protein","liver"],["albumin","Albumin","liver"],["globulin","Globulin","liver"],["ag","Albumin/Globulin Ratio","liver"],["ast_alt","AST/ALT Ratio","liver"],["amylase","Amylase","liver"],["lipase","Lipase","liver"],["nafld","NAFLD Fibrosis Score","liver"],
+ ["creat","Creatinine","kidney"],["egfr","eGFR","kidney"],["urea","Blood Urea","kidney"],["bun","BUN","kidney"],["bun_cr","BUN/Creatinine Ratio","kidney"],["uric","Uric Acid","kidney"],["na","Sodium","kidney"],["k","Potassium","kidney"],["cl","Chloride","kidney"],["ca","Calcium","kidney"],["phos","Phosphorus","kidney"],["mg","Magnesium","kidney"],["uacr","Urine Albumin/Creatinine Ratio","kidney"],
+ ["fbs","Fasting Glucose","sugar"],["hba1c","HbA1c","sugar"],["eag","Estimated Average Glucose","sugar"],["insulin","Fasting Insulin","sugar"],["homa_ir","HOMA-IR","sugar"],["ppbs","Post-meal Glucose","sugar"],
+ ["t3","T3, Total","thyroid"],["t4","T4, Total","thyroid"],["tsh","TSH","thyroid"],["ft3","Free T3","thyroid"],["ft4","Free T4","thyroid"],
+ ["b12","Vitamin B12","vitamins"],["vitd","Vitamin D (25-OH)","vitamins"],["folate","Folate","vitamins"],["iron","Serum Iron","vitamins"],["tibc","TIBC","vitamins"],["uibc","UIBC","vitamins"],["tsat","Transferrin Saturation","vitamins"],["ferritin","Ferritin","vitamins"],
+ ["testo","Testosterone, Total","hormones"],["ftesto","Free Testosterone","hormones"],["shbg","SHBG","hormones"],["lh","LH","hormones"],["fsh","FSH","hormones"],["prolactin","Prolactin","hormones"],["estradiol","Estradiol","hormones"],["cortisol","Cortisol","hormones"],
+ ["hb","Haemoglobin","cbc"],["pcv","Hematocrit (PCV)","cbc"],["rbc","RBC Count","cbc"],["mcv","MCV","cbc"],["mch","MCH","cbc"],["mchc","MCHC","cbc"],["rdw_cv","RDW-CV","cbc"],["rdw_sd","RDW-SD","cbc"],["tlc","Total WBC (TLC)","cbc"],["neut","Neutrophils","cbc"],["lymph","Lymphocytes","cbc"],["mono","Monocytes","cbc"],["eos","Eosinophils","cbc"],["baso","Basophils","cbc"],["anc","Abs. Neutrophils","cbc"],["alc","Abs. Lymphocytes","cbc"],["amc","Abs. Monocytes","cbc"],["aec","Abs. Eosinophils","cbc"],["abc","Abs. Basophils","cbc"],["plt","Platelets","cbc"],["mpv","MPV","cbc"],["mentzer","Mentzer Index","cbc"],["rdwi","RDW Index","cbc"],["gk","Green & King Index","cbc"],["nlr","Neutrophil/Lymphocyte Ratio","cbc"],["plr","Platelet/Lymphocyte Ratio","cbc"],["esr","ESR","cbc"],
+ ["hscrp","hs-CRP","other"],["crp","CRP","other"],["homocys","Homocysteine","other"],["rf","Rheumatoid Factor","other"],["ige","IgE, Total","other"],["ck","Creatine Kinase (CPK)","other"],["ckmb","CK-MB","other"],["ldh","LDH","other"],["psa","PSA","other"],["afp","AFP","other"],["cea","CEA","other"],["ca199","CA 19-9","other"]
+];
+const KEY_W = {tg:2,ldl:2,nonhdl:2,hdl:1.5,alt:2,ggt:2,hba1c:2,fbs:1.5,b12:2,vitd:2,uric:2,testo:2,ftesto:1.5,hb:2,tsh:2,hscrp:2,creat:1.5,egfr:1.5,ferritin:1.5};
+const INFO_KEYS = new Set(["ldl_hdl","hdl_ldl","bili_d","bili_i","globulin","ag","ast_alt","bun","bun_cr","uibc","rdw_sd","neut","lymph","mono","eos","baso","anc","alc","amc","aec","abc","mpv","mentzer","rdwi","gk","nlr","plr","eag"]);
+const BODY = [
+ ["body_score","Body score","pts"],["weight","Weight","kg"],["bmi","BMI","kg/m²"],["bfr","Body fat","%"],["fat_mass","Fat mass","kg"],["visceral","Visceral fat grade",""],["subq","Subcutaneous fat","%"],
+ ["skm","Skeletal muscle","kg"],["muscle_mass","Muscle mass","kg"],["ffm","Fat-free mass","kg"],["protein_mass","Protein","kg"],["water","Body water","kg"],["bone","Bone mass","kg"],
+ ["smi","Skeletal muscle index","kg/m²"],["bmr","Basal metabolic rate","kcal"],["whr","Waist-hip ratio",""],["body_age","Body age","yrs"],["target_weight","Target weight","kg"],
+ ["seg_fat_trunk","Trunk fat","kg"],["seg_fat_arms","Arm fat (L+R)","kg"],["seg_fat_legs","Leg fat (L+R)","kg"]
+];
+const BODY_HERO = ["weight","bfr","fat_mass","visceral","skm","bmi","whr","subq","bmr","body_age","water","protein_mass","bone","smi","ffm","target_weight"];
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const pd = s => { const [y,m,d] = String(s).slice(0,10).split("-").map(Number); return new Date(Date.UTC(y,(m||1)-1,d||1)); };
+const fmtD = s => { const d = pd(s); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
+const fmtShort = s => { const d = pd(s); return `${MON[d.getUTCMonth()]} ’${String(d.getUTCFullYear()).slice(2)}`; };
+const iso = d => d.toISOString().slice(0,10);
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+const monthsBetween = (a,b) => (pd(b) - pd(a)) / (1000*60*60*24*30.44);
+const fmtN = (v, dp) => { if (typeof v !== "number") return esc(v); const a = Math.abs(v); const p = dp ?? (a >= 100 ? 0 : a >= 10 ? 1 : 2); return v.toLocaleString("en-IN",{maximumFractionDigits:p,minimumFractionDigits:0}); };
+const numVal = v => { if (typeof v === "number") return v; if (v == null) return null; const s = String(v).trim(); const m = s.match(/^([<>]=?)?\s*(-?\d+(?:\.\d+)?)/); if (!m) return null; const n = parseFloat(m[2]); if (m[1] && m[1][0] === "<") return n * 0.999 - 1e-9; if (m[1] && m[1][0] === ">") return n * 1.001 + 1e-9; return n; };
+const catName = k => (CATS[k]||CATS.other).name;
+const ICON = {
+  ok:'<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2l2.3 2.3 4.7-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  border:'<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2.5v4.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="6" cy="9.2" r="1" fill="currentColor"/></svg>',
+  out:'<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  info:'<svg viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="2" fill="currentColor"/></svg>'
+};
+const STLABEL = {ok:"In range",border:"Borderline",out:"Out of range",info:"For reference"};
+function chip(st, txt){ return `<span class="chip ${st}">${ICON[st]||""}${esc(txt ?? STLABEL[st])}</span>`; }
+
+/* ---------- scoring ---------- */
+function devOf(p){ // relative distance outside range; 0 when inside; null when not gradable
+  const v = numVal(p.value); if (v == null) return null;
+  if (p.low == null && p.high == null) return null;
+  if (p.low != null && v < p.low) return (p.low - v) / Math.max(Math.abs(p.low), 1e-9);
+  if (p.high != null && v > p.high) return (v - p.high) / Math.max(Math.abs(p.high), 1e-9);
+  return 0;
+}
+function statusOf(p){
+  if (p.flag && ["ok","border","out"].includes(p.flag)) return p.flag;
+  if (p.key === "hba1c") { const v = numVal(p.value); if (v != null) return v >= 6.5 ? "out" : v >= 5.7 ? "border" : "ok"; }
+  const d = devOf(p); if (d == null) return "info";
+  return d === 0 ? "ok" : d <= 0.1 ? "border" : "out";
+}
+function pointsOf(p){ const st = statusOf(p); if (st === "ok") return 100; if (st === "border") return 65; if (st === "out") return devOf(p) > 0.5 ? 15 : 35; return null; }
+const isScored = p => p.scored !== 0 && p.scored !== false && !INFO_KEYS.has(p.key);
+const band = s => s >= 85 ? ["Excellent","var(--ok)"] : s >= 70 ? ["Good","var(--ok)"] : s >= 55 ? ["Fair","var(--warn)"] : ["Needs work","var(--bad)"];
+
+/* ---------- state ---------- */
+const S = { reports:[], activity:{}, loadedR:false, loadedA:false, db:null, assets:null, sample:null, sampleLimits:null, owner:true,
+  tab:"overview", resFlagged:false, resAll:false, resQ:"", histCat:"lipids", histKey:null, actRange:30 };
+let D = null; // derived
+
+function derive(){
+  const blood = S.reports.filter(r => r.type === "blood").sort((a,b) => a.date < b.date ? -1 : 1);
+  const body = S.reports.filter(r => r.type === "body").sort((a,b) => a.date < b.date ? -1 : 1);
+  const series = {}; // key -> [{date, p, rid}] ascending
+  for (const r of blood) for (const p of (r.params||[])) { (series[p.key] ||= []).push({date:r.date, p, rid:r.id}); }
+  for (const k in series) series[k].sort((a,b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const bloodDates = [...new Set(blood.map(r => r.date))].sort();
+  const lastBlood = bloodDates[bloodDates.length-1] || null;
+  const latest = {}; for (const k in series) latest[k] = series[k][series[k].length-1];
+  // category scores
+  const cat = {};
+  for (const k in latest) {
+    const e = latest[k], p = e.p; const c = CATS[p.cat] ? p.cat : "other";
+    (cat[c] ||= {sum:0, w:0, n:0, flagged:0, items:[]}).items.push(e);
+    if (!isScored(p)) continue;
+    const pts = pointsOf(p); if (pts == null) continue;
+    const stale = lastBlood && monthsBetween(e.date, lastBlood) > 18;
+    const w = (stale ? 0.4 : 1) * (KEY_W[p.key] || 1);
+    cat[c].sum += pts*w; cat[c].w += w; cat[c].n++; if (statusOf(p) !== "ok" && !stale) cat[c].flagged++;
+  }
+  let bs = 0, bw = 0;
+  for (const c in cat) { if (cat[c].w > 0) { cat[c].score = Math.round(cat[c].sum / cat[c].w); bs += cat[c].score * CATS[c].w; bw += CATS[c].w; } }
+  const bloodScore = bw ? Math.round(bs/bw) : null;
+  // body
+  const lastBody = body[body.length-1] || null;
+  let bodyScore = null, bodyBasis = "";
+  if (lastBody) {
+    const bp = Object.fromEntries((lastBody.params||[]).map(p => [p.key,p]));
+    if (bp.body_score && typeof bp.body_score.value === "number") { bodyScore = Math.round(bp.body_score.value); bodyBasis = "Gym scan score"; }
+    else { const ks = ["bfr","visceral","bmi","whr","skm"].filter(k => bp[k]); const pts = ks.map(k => pointsOf(bp[k])).filter(x => x != null); if (pts.length) { bodyScore = Math.round(pts.reduce((a,b)=>a+b,0)/pts.length); bodyBasis = "From fat, muscle and BMI"; } }
+  }
+  // activity
+  const act = activityWindow(30);
+  let actScore = null; if (act.days > 0) actScore = Math.min(100, Math.round(act.avg / 10000 * 100));
+  const parts = [[bloodScore,.65],[bodyScore,.2],[actScore,.15]].filter(x => x[0] != null);
+  const wsum = parts.reduce((a,x) => a + x[1], 0);
+  const overall = parts.length ? Math.round(parts.reduce((a,x) => a + x[0]*x[1], 0) / wsum) : null;
+  D = { blood, body, series, latest, cat, bloodScore, bodyScore, bodyBasis, actScore, act, overall, lastBlood, lastBody, bloodDates };
+}
+
+function activityWindow(n){
+  const days = Object.keys(S.activity).filter(d => S.activity[d] && typeof S.activity[d].s === "number").sort();
+  if (!days.length) return {days:0, avg:0, end:null, list:[]};
+  const t = todayISO();
+  let end = t;
+  const startT = iso(new Date(pd(t) - (n-1)*864e5));
+  const recent = days.filter(d => d >= startT && d <= t);
+  let asOf = false;
+  if (!recent.length) { end = days[days.length-1]; asOf = true; }
+  const start = iso(new Date(pd(end) - (n-1)*864e5));
+  const list = [];
+  for (let i = 0; i < n; i++) { const d = iso(new Date(pd(start).getTime() + i*864e5)); const v = S.activity[d]; list.push({d, s: v && typeof v.s === "number" ? v.s : null, k: v?.k ?? null}); }
+  const have = list.filter(x => x.s != null);
+  const avg = have.length ? have.reduce((a,x) => a + x.s, 0) / have.length : 0;
+  return {days: have.length, avg, end, start, list, asOf};
+}
+
+/* trend: compare latest vs previous for one key */
+function trendOf(k){
+  const s = D.series[k]; if (!s || s.length < 2) return null;
+  const a = s[s.length-2], b = s[s.length-1];
+  const va = numVal(a.p.value), vb = numVal(b.p.value); if (va == null || vb == null) return null;
+  const da = devOf(a.p), db = devOf(b.p);
+  let dir = "flat";
+  if (da != null && db != null) { if (db < da - 0.02) dir = "better"; else if (db > da + 0.02) dir = "worse"; }
+  const pct = va !== 0 ? (vb - va) / Math.abs(va) * 100 : 0;
+  return { prev:a, cur:b, va, vb, dir, pct };
+}
+function deltaHTML(k){
+  const t = trendOf(k); if (!t) return `<span class="delta flat">first test</span>`;
+  const arrow = t.vb > t.va ? "▲" : t.vb < t.va ? "▼" : "•";
+  return `<span class="delta ${t.dir}" title="Previous: ${esc(fmtN(t.va))} on ${fmtD(t.prev.date)}">${arrow} ${fmtN(Math.abs(t.vb - t.va))} vs ${fmtShort(t.prev.date)}</span>`;
+}
+
+/* ---------- small SVGs ---------- */
+function rangeBar(p){
+  const v = numVal(p.value); const lo = p.low, hi = p.high;
+  if (v == null || (lo == null && hi == null)) return `<div class="small muted">${esc(p.ref || "No reference range")}</div>`;
+  let a = lo != null ? lo : (hi > 0 ? 0 : hi - Math.abs(hi));
+  let b = hi != null ? hi : lo * 2;
+  const span = b - a || 1;
+  let min = Math.min(a - span*.35, v), max = Math.max(b + span*.35, v);
+  if (lo == null && a === 0) min = Math.min(0, v);
+  const W = 300, x = t => 6 + (t - min) / (max - min) * (W - 12);
+  const st = statusOf(p); const col = st === "ok" ? "var(--ok)" : st === "border" ? "var(--warn)" : "var(--bad)";
+  return `<svg viewBox="0 0 ${W} 22" preserveAspectRatio="none" role="img" aria-label="${esc(STLABEL[st])}: ${esc(fmtN(v))} against range ${esc(p.ref||"")}">
+    <rect x="6" y="9" width="${W-12}" height="4" rx="2" fill="var(--line)"/>
+    <rect x="${x(a)}" y="9" width="${Math.max(2, x(b)-x(a))}" height="4" rx="2" fill="var(--ok)" opacity=".45"/>
+    <circle cx="${x(v)}" cy="11" r="5.5" fill="${col}" stroke="var(--surface)" stroke-width="2"/></svg>`;
+}
+function spark(k){
+  const s = (D.series[k]||[]).map(e => numVal(e.p.value)).filter(v => v != null);
+  if (s.length < 2) return "";
+  const W = 70, H = 20, mn = Math.min(...s), mx = Math.max(...s), r = mx - mn || 1;
+  const pts = s.map((v,i) => `${(i/(s.length-1)*(W-4)+2).toFixed(1)},${(H-2-(v-mn)/r*(H-4)).toFixed(1)}`);
+  const last = pts[pts.length-1].split(",");
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polyline points="${pts.join(" ")}" fill="none" stroke="var(--ink-2)" stroke-width="1.5" stroke-linejoin="round"/><circle cx="${last[0]}" cy="${last[1]}" r="2.6" fill="var(--accent)"/></svg>`;
+}
+function ringSVG(score){
+  const r = 80, c = 2*Math.PI*r; const s = score ?? 0; const [lbl,col] = score == null ? ["—","var(--muted)"] : band(s);
+  return `<svg viewBox="0 0 190 190" aria-hidden="true"><circle cx="95" cy="95" r="${r}" fill="none" stroke="var(--line)" stroke-width="14"/>
+    <circle cx="95" cy="95" r="${r}" fill="none" stroke="${col}" stroke-width="14" stroke-linecap="round" stroke-dasharray="${(c*s/100).toFixed(1)} ${c.toFixed(1)}"/></svg>
+    <div class="val"><div class="big" role="img" aria-label="Overall score ${score ?? "not available"} out of 100">${score ?? "—"}</div><div class="of">OUT OF 100</div><div class="band" style="color:${col}">${score == null ? "" : lbl}</div></div>`;
+}
+
+/* generic line chart with optional reference band and tooltip */
+function lineChart(el, pts, opts={}){
+  // pts: [{x:'YYYY-MM-DD', y:number, st?, label?, hollow?, series?}]
+  if (!pts.length) { el.innerHTML = `<div class="empty">No values yet.</div>`; return; }
+  const W = el.clientWidth || 640, H = opts.h || 260, m = {l:46, r:18, t:16, b:30};
+  const xs = pts.map(p => pd(p.x).getTime());
+  let x0 = Math.min(...xs), x1 = Math.max(...xs); if (x0 === x1) { x0 -= 864e5*60; x1 += 864e5*60; }
+  const padX = (x1-x0)*.04; x0 -= padX; x1 += padX;
+  let ys = pts.map(p => p.y); if (opts.low != null) ys.push(opts.low); if (opts.high != null) ys.push(opts.high);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys); const pr = (y1-y0)*.15 || Math.abs(y1)*.1 || 1; y0 -= pr; y1 += pr;
+  if (opts.zero && y0 > 0 && y0 < (y1-y0)*.6) y0 = 0;
+  const X = t => m.l + (t-x0)/(x1-x0)*(W-m.l-m.r), Y = v => m.t + (1-(v-y0)/(y1-y0))*(H-m.t-m.b);
+  const ticks = niceTicks(y0, y1, 4);
+  let g = "";
+  for (const t of ticks) g += `<line x1="${m.l}" x2="${W-m.r}" y1="${Y(t)}" y2="${Y(t)}" stroke="var(--grid)"/><text x="${m.l-8}" y="${Y(t)+4}" text-anchor="end">${fmtN(t)}</text>`;
+  // band
+  if (opts.low != null || opts.high != null) {
+    const top = Y(opts.high != null ? opts.high : y1), bot = Y(opts.low != null ? opts.low : y0);
+    g += `<rect x="${m.l}" width="${W-m.l-m.r}" y="${top}" height="${Math.max(0,bot-top)}" fill="var(--band)"/>`;
+    if (opts.high != null) g += `<line x1="${m.l}" x2="${W-m.r}" y1="${Y(opts.high)}" y2="${Y(opts.high)}" stroke="var(--ok)" stroke-dasharray="3 4" opacity=".7"/>`;
+    if (opts.low != null) g += `<line x1="${m.l}" x2="${W-m.r}" y1="${Y(opts.low)}" y2="${Y(opts.low)}" stroke="var(--ok)" stroke-dasharray="3 4" opacity=".7"/>`;
+  }
+  // x labels: each unique date if few, else years
+  const ud = [...new Set(pts.map(p => p.x))].sort();
+  if (ud.length <= 7 && W > 420) for (const d of ud) g += `<text x="${X(pd(d).getTime())}" y="${H-8}" text-anchor="middle">${fmtShort(d)}</text>`;
+  else { const ya = pd(ud[0]).getUTCFullYear(), yb = pd(ud[ud.length-1]).getUTCFullYear(); for (let y = ya; y <= yb + 1; y++) { const t = Date.UTC(y,0,1); if (t >= x0 && t <= x1) g += `<line x1="${X(t)}" x2="${X(t)}" y1="${m.t}" y2="${H-m.b}" stroke="var(--grid)"/><text x="${X(t)+4}" y="${H-8}">${y}</text>`; } }
+  // lines per series
+  const groups = {}; pts.forEach((p,i) => (groups[p.series||"a"] ||= []).push({...p, t:xs[i]}));
+  for (const k in groups) {
+    const arr = groups[k].sort((a,b) => a.t-b.t);
+    const dash = arr[0].dash ? ` stroke-dasharray="4 4"` : "";
+    if (arr.length > 1) g += `<polyline points="${arr.map(p => `${X(p.t).toFixed(1)},${Y(p.y).toFixed(1)}`).join(" ")}" fill="none" stroke="${arr[0].color||"var(--ink-2)"}" stroke-width="2" stroke-linejoin="round"${dash}/>`;
+  }
+  pts.forEach((p,i) => {
+    const col = p.st === "ok" ? "var(--ok)" : p.st === "border" ? "var(--warn)" : p.st === "out" ? "var(--bad)" : (p.color || "var(--accent)");
+    g += `<circle cx="${X(xs[i])}" cy="${Y(p.y)}" r="5" fill="${p.hollow ? "var(--surface)" : col}" stroke="${p.hollow ? col : "var(--surface)"}" stroke-width="2"/>`;
+  });
+  if (opts.labelEnds !== false && pts.length) {
+    const last = pts.reduce((a,b,i) => xs[i] > a.t ? {t:xs[i], p:b} : a, {t:-Infinity, p:null});
+    if (last.p) g += `<text x="${Math.min(X(last.t), W-m.r-2)}" y="${Y(last.p.y)-11}" text-anchor="end" style="fill:var(--ink);font-weight:600">${fmtN(last.p.y)}</text>`;
+  }
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.aria||"Chart")}">${g}<rect class="hit" x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="transparent"/></svg><div class="tip"></div>`;
+  const svg = el.querySelector("svg"), tip = el.querySelector(".tip");
+  const move = ev => {
+    const r = svg.getBoundingClientRect(); const sx = (ev.clientX - r.left) * W / r.width;
+    let bi = 0, bd = Infinity; xs.forEach((t,i) => { const d = Math.abs(X(t) - sx); if (d < bd) { bd = d; bi = i; } });
+    const p = pts[bi];
+    tip.innerHTML = `${fmtD(p.x)} · <b>${fmtN(p.y)}</b>${opts.unit ? " " + esc(opts.unit) : ""}${p.label ? `<br>${esc(p.label)}` : ""}`;
+    tip.style.left = (X(xs[bi]) / W * r.width) + "px"; tip.style.top = (Y(p.y) / H * r.height) + "px"; tip.style.opacity = 1;
+  };
+  svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move);
+  svg.addEventListener("pointerleave", () => tip.style.opacity = 0);
+}
+function niceTicks(a, b, n){
+  const span = b - a; if (span <= 0) return [a];
+  const step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0))); const f = step0/mag;
+  const step = (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * mag;
+  const out = []; for (let t = Math.ceil(a/step)*step; t <= b + 1e-9; t += step) out.push(+t.toFixed(10)); return out;
+}
+function barChart(el, list, opts={}){
+  const W = el.clientWidth || 640, H = opts.h || 220, m = {l:44, r:10, t:14, b:26};
+  if (!list.some(x => x.v != null)) { el.innerHTML = `<div class="empty">${esc(opts.empty || "No data in this range.")}</div>`; return; }
+  const goal = opts.goal; const mx = Math.max(goal || 0, ...list.map(x => x.v || 0)) * 1.1;
+  const bw = (W-m.l-m.r)/list.length; const gap = list.length > 60 ? 0.5 : 2;
+  const Y = v => m.t + (1 - v/mx)*(H-m.t-m.b);
+  let g = "";
+  for (const t of niceTicks(0, mx, 4)) g += `<line x1="${m.l}" x2="${W-m.r}" y1="${Y(t)}" y2="${Y(t)}" stroke="var(--grid)"/><text x="${m.l-6}" y="${Y(t)+4}" text-anchor="end">${t >= 1000 ? (t/1000)+"k" : t}</text>`;
+  list.forEach((x,i) => {
+    if (x.v == null) return;
+    const h = Math.max(1, (H-m.b) - Y(x.v)); const col = goal && x.v >= goal ? "var(--ok)" : "var(--accent)";
+    g += `<rect x="${(m.l + i*bw + gap/2).toFixed(1)}" y="${Y(x.v).toFixed(1)}" width="${Math.max(1,bw-gap).toFixed(1)}" height="${h.toFixed(1)}" rx="${bw > 8 ? 3 : 0}" fill="${col}" opacity="${goal && x.v >= goal ? 1 : .8}"/>`;
+  });
+  if (goal) g += `<line x1="${m.l}" x2="${W-m.r}" y1="${Y(goal)}" y2="${Y(goal)}" stroke="var(--ink-2)" stroke-dasharray="4 4"/><text x="${W-m.r}" y="${Y(goal)-5}" text-anchor="end" style="fill:var(--ink-2);paint-order:stroke;stroke:var(--surface);stroke-width:4px;font-weight:600">goal ${goal.toLocaleString("en-IN")}</text>`;
+  const every = Math.ceil(list.length / Math.max(2, Math.floor((W-m.l)/70)));
+  list.forEach((x,i) => { if (i % every === 0) g += `<text x="${m.l + i*bw + bw/2}" y="${H-8}" text-anchor="middle">${esc(opts.xl ? opts.xl(x) : x.d)}</text>`; });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.aria||"Bar chart")}">${g}<rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="transparent"/></svg><div class="tip"></div>`;
+  const svg = el.querySelector("svg"), tip = el.querySelector(".tip");
+  const move = ev => { const r = svg.getBoundingClientRect(); const sx = (ev.clientX - r.left) * W / r.width; const i = Math.min(list.length-1, Math.max(0, Math.floor((sx - m.l)/bw))); const x = list[i];
+    tip.innerHTML = `${esc(opts.tl ? opts.tl(x) : x.d)} · <b>${x.v == null ? "no data" : Math.round(x.v).toLocaleString("en-IN")}</b>${x.v == null ? "" : " " + (opts.unit||"")}`;
+    tip.style.left = ((m.l + i*bw + bw/2) / W * r.width) + "px"; tip.style.top = (Y(x.v || 0) / H * r.height) + "px"; tip.style.opacity = 1; };
+  svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", () => tip.style.opacity = 0);
+}
+
+/* ---------- render: overview ---------- */
+function renderOverview(){
+  $("#ring").innerHTML = ringSVG(D.overall);
+  const [lbl] = D.overall == null ? ["—"] : band(D.overall);
+  $("#heroHead").textContent = D.overall == null ? "Your records will appear here" :
+    (D.overall >= 85 ? "In great shape" : D.overall >= 70 ? "Good, with a few things to tidy up" : D.overall >= 55 ? "Fair: a clear metabolic pattern to work on" : "Several markers need attention");
+  const sub = (k, v, w, note) => `<div class="sub-s"><div class="k">${k}</div><div class="v">${v == null ? "—" : v}</div><div class="w">${note}</div></div>`;
+  $("#subScores").innerHTML =
+    sub("Bloodwork", D.bloodScore, .65, D.lastBlood ? `65% weight · ${fmtShort(D.lastBlood)}` : "No tests yet") +
+    sub("Body composition", D.bodyScore, .2, D.lastBody ? `20% · ${esc(D.bodyBasis)}` : "No scan yet") +
+    sub("Activity", D.actScore, .15, D.act.days ? `15% · ${Math.round(D.act.avg).toLocaleString("en-IN")} steps/day` : "Import Apple Health");
+  const bits = [];
+  if (D.lastBlood) bits.push(`Latest blood test <b>${fmtD(D.lastBlood)}</b>`);
+  if (D.lastBody) bits.push(`body scan <b>${fmtD(D.lastBody.date)}</b>`);
+  bits.push(`${S.reports.length} report${S.reports.length === 1 ? "" : "s"} on file`);
+  $("#heroMeta").innerHTML = bits.join(" · ") + `<div class="small muted" style="margin-top:6px">Each marker scores 100 in range, 65 borderline (≤10% outside), 35 out of range, 15 far out (>50%). Key markers (e.g. triglycerides, LDL, ALT, GGT, HbA1c, B12, vitamin D, uric acid, testosterone) count double within a system, and systems are weighted (lipids, liver and sugar most); markers older than 18 months count less. Activity scores your 30-day step average against 10,000.</div>`;
+
+  // systems
+  const order = Object.keys(CATS).filter(c => D.cat[c] && D.cat[c].score != null);
+  $("#sysScores").innerHTML = order.length ? order.map(c => {
+    const o = D.cat[c]; const [, col] = band(o.score);
+    return `<button data-cat="${c}"><div class="t"><span>${esc(CATS[c].name)}</span><span class="mono" style="color:${col}">${o.score}</span></div>
+      <div class="bar"><i style="width:${o.score}%;background:${col}"></i></div>
+      <div class="f">${o.flagged ? `${o.flagged} of ${o.n} markers flagged` : `All ${o.n} markers in range`}</div></button>`;
+  }).join("") : `<div class="empty">No blood tests yet. Upload one from the Reports tab.</div>`;
+  $("#sysScores").querySelectorAll("button").forEach(b => b.onclick = () => { S.histCat = b.dataset.cat; S.resQ = ""; go("results", b.dataset.cat); });
+
+  // attention
+  const fresh = Object.values(D.latest).filter(e => isScored(e.p) && D.lastBlood && monthsBetween(e.date, D.lastBlood) <= 12);
+  const flagged = fresh.filter(e => ["out","border"].includes(statusOf(e.p))).sort((a,b) => (devOf(b.p)||0) - (devOf(a.p)||0));
+  $("#attn").innerHTML = flagged.length ? flagged.slice(0,10).map(e => {
+    const p = e.p, st = statusOf(p);
+    return `<div class="lrow"><div class="n">${esc(p.name)} ${chip(st)}</div><div class="v">${fmtN(numVal(p.value) ?? p.value)} <span class="muted small">${esc(p.unit)}</span></div>
+      <div class="d">Range ${esc(p.ref || "")} · ${deltaHTML(p.key)}</div></div>`;
+  }).join("") + (flagged.length > 10 ? `<div class="small muted" style="padding-top:8px">+${flagged.length-10} more in Latest results.</div>` : "") : `<div class="empty">Nothing flagged in your latest test.</div>`;
+
+  const better = Object.keys(D.latest).map(trendOf).filter(t => t && t.dir === "better" && isScored(t.cur.p) && t.cur.date === D.lastBlood)
+    .sort((a,b) => ((devOf(a.prev.p)||0)-(devOf(a.cur.p)||0)) < ((devOf(b.prev.p)||0)-(devOf(b.cur.p)||0)) ? 1 : -1);
+  $("#better").innerHTML = better.length ? better.slice(0,8).map(t => `<div class="lrow"><div class="n">${esc(t.cur.p.name)} ${chip(statusOf(t.cur.p))}</div>
+    <div class="v">${fmtN(t.va)} → <b>${fmtN(t.vb)}</b> <span class="muted small">${esc(t.cur.p.unit)}</span></div><div class="d">${fmtShort(t.prev.date)} → ${fmtShort(t.cur.date)} · range ${esc(t.cur.p.ref||"")}</div></div>`).join("")
+    : `<div class="empty">No marker improved since the previous test.</div>`;
+
+  const due = Object.values(D.latest).filter(e => isScored(e.p) && monthsBetween(e.date, todayISO()) > 12)
+    .sort((a,b) => (statusOf(b.p) === "ok" ? 0 : 1) - (statusOf(a.p) === "ok" ? 0 : 1) || (a.date < b.date ? -1 : 1));
+  $("#due").innerHTML = due.length ? due.slice(0,12).map(e => `<div class="lrow"><div class="n">${esc(e.p.name)} ${chip(statusOf(e.p), statusOf(e.p) === "ok" ? "Was in range" : "Was " + STLABEL[statusOf(e.p)].toLowerCase())}</div>
+    <div class="v">${fmtN(numVal(e.p.value) ?? e.p.value)} <span class="muted small">${esc(e.p.unit)}</span></div><div class="d">Last checked ${fmtD(e.date)}</div></div>`).join("") : `<div class="empty">Every marker has been checked in the last year.</div>`;
+
+  const sugg = ["What should I fix first?","Why might my testosterone have dropped?","Which tests should I add next time?","Is my liver trend worrying?"];
+  $("#askSugg").innerHTML = sugg.map(s => `<button class="pill-btn" type="button">${esc(s)}</button>`).join("");
+  $("#askSugg").querySelectorAll("button").forEach(b => b.onclick = () => { $("#askQ").value = b.textContent; ask(); });
+}
+
+/* ---------- render: results ---------- */
+function renderResults(){
+  const q = S.resQ.trim().toLowerCase();
+  const out = [];
+  for (const c of Object.keys(CATS)) {
+    const o = D.cat[c]; if (!o) continue;
+    let items = o.items.slice();
+    if (!S.resAll) items = items.filter(e => isScored(e.p));
+    if (S.resFlagged) items = items.filter(e => ["out","border"].includes(statusOf(e.p)));
+    if (q) items = items.filter(e => (e.p.name + " " + e.p.key + " " + CATS[c].name).toLowerCase().includes(q));
+    if (!items.length) continue;
+    const ord = CATALOG.map(x => x[0]);
+    items.sort((a,b) => { const ia = ord.indexOf(a.p.key), ib = ord.indexOf(b.p.key); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); });
+    out.push(`<div class="card" id="cat-${c}"><div class="card-h"><h2>${esc(CATS[c].name)}</h2>${o.score != null ? `<span class="mono" style="color:${band(o.score)[1]};font-weight:600">${o.score}/100</span>` : ""}</div><div class="res-cat">` +
+      items.map(e => { const p = e.p, st = statusOf(p); const old = D.lastBlood && e.date !== D.lastBlood;
+        return `<div class="mrow" data-key="${esc(p.key)}" data-cat="${c}" role="button" tabindex="0">
+          <div style="min-width:0"><div class="mn">${esc(p.name)}</div><div class="mmeta">${chip(st)} ${old ? `<span class="chip stale">Tested ${fmtShort(e.date)}</span>` : ""}</div></div>
+          <div class="rb">${rangeBar(p)}<div class="mmeta">Range ${esc(p.ref || "—")}</div></div>
+          <div><div class="mval">${fmtN(numVal(p.value) ?? p.value)} <small>${esc(p.unit)}</small></div><div style="text-align:right">${deltaHTML(p.key)}</div></div></div>`; }).join("") + `</div></div>`);
+  }
+  $("#resBody").innerHTML = out.length ? out.join("") : `<div class="empty">${S.reports.length ? "No markers match." : "No blood tests yet."}</div>`;
+  $("#resBody").querySelectorAll(".mrow").forEach(r => { const f = () => { S.histCat = r.dataset.cat; S.histKey = r.dataset.key; go("history"); }; r.onclick = f; r.onkeydown = e => { if (e.key === "Enter") f(); }; });
+}
+
+/* ---------- render: history ---------- */
+function renderHistory(){
+  const cats = Object.keys(CATS).filter(c => D.cat[c]);
+  if (!cats.includes(S.histCat)) S.histCat = cats[0] || "lipids";
+  $("#histCats").innerHTML = cats.map(c => `<button class="pill-btn" data-c="${c}" aria-pressed="${c === S.histCat}">${esc(CATS[c].name)}</button>`).join("");
+  $("#histCats").querySelectorAll("button").forEach(b => b.onclick = () => { S.histCat = b.dataset.c; S.histKey = null; renderHistory(); });
+  const ord = CATALOG.map(x => x[0]);
+  const keys = Object.keys(D.series).filter(k => (CATS[D.latest[k].p.cat] ? D.latest[k].p.cat : "other") === S.histCat)
+    .sort((a,b) => (ord.indexOf(a) < 0 ? 999 : ord.indexOf(a)) - (ord.indexOf(b) < 0 ? 999 : ord.indexOf(b)));
+  if (!keys.length) { $("#histList").innerHTML = ""; $("#histChart").innerHTML = `<div class="empty">No results yet.</div>`; $("#mx").innerHTML = ""; return; }
+  if (!S.histKey || !keys.includes(S.histKey)) S.histKey = keys.find(k => isScored(D.latest[k].p) && statusOf(D.latest[k].p) !== "ok") || keys[0];
+  $("#histList").innerHTML = keys.map(k => { const p = D.latest[k].p; return `<button data-k="${esc(k)}" aria-pressed="${k === S.histKey}"><span>${esc(p.name)}</span><span class="row" style="gap:6px"><span class="muted small mono">${D.series[k].length}×</span><span class="dot ${statusOf(p)}"></span></span></button>`; }).join("");
+  $("#histList").querySelectorAll("button").forEach(b => b.onclick = () => { S.histKey = b.dataset.k; renderHistory(); });
+  const s = D.series[S.histKey], lp = s[s.length-1].p;
+  $("#histTitle").textContent = lp.name;
+  $("#histSub").textContent = `${s.length} test${s.length > 1 ? "s" : ""} · ${fmtShort(s[0].date)} to ${fmtShort(s[s.length-1].date)} · range ${lp.ref || "—"}${lp.unit ? " " + lp.unit : ""}`;
+  $("#histChip").innerHTML = chip(statusOf(lp), `Latest: ${STLABEL[statusOf(lp)]}`);
+  const pts = s.map(e => ({x:e.date, y:numVal(e.p.value), st:statusOf(e.p)})).filter(p => p.y != null);
+  lineChart($("#histChart"), pts, {low: lp.low, high: lp.high, unit: lp.unit, aria: `${lp.name} over time`});
+  const t = trendOf(S.histKey); const first = pts[0], last = pts[pts.length-1];
+  $("#histNote").innerHTML = pts.length > 1 ? `Change since first test: <b class="mono">${last.y - first.y >= 0 ? "+" : ""}${fmtN(last.y - first.y)}</b> ${esc(lp.unit)} (${first.y ? fmtN((last.y-first.y)/Math.abs(first.y)*100,0) : "—"}%). ${t ? (t.dir === "better" ? "Latest move is toward the healthy range." : t.dir === "worse" ? "Latest move is away from the healthy range." : "") : ""} Shaded band = reference range.` : "Only one test so far. A second one will show the trend.";
+  // matrix
+  const dates = D.bloodDates;
+  const head = `<thead><tr><th>${esc(CATS[S.histCat].name)}</th>${dates.map(d => `<th>${fmtShort(d)}</th>`).join("")}<th>Range</th></tr></thead>`;
+  const body = keys.map(k => { const by = Object.fromEntries(D.series[k].map(e => [e.date, e.p])); const lp2 = D.latest[k].p;
+    return `<tr data-k="${esc(k)}"><td title="${esc(lp2.name)}">${esc(lp2.name)}</td>${dates.map(d => { const p = by[d]; if (!p) return `<td class="c"><span class="muted">·</span></td>`; const st = statusOf(p); return `<td class="c"><span class="${st}" title="${esc(STLABEL[st])}">${fmtN(numVal(p.value) ?? p.value)}${st === "out" ? " ✕" : st === "border" ? " !" : ""}</span></td>`; }).join("")}<td class="small muted">${esc(lp2.ref || "")}</td></tr>`; }).join("");
+  $("#mxTitle").textContent = `${CATS[S.histCat].name}: all tests side by side`;
+  $("#mx").innerHTML = head + `<tbody>${body}</tbody>`;
+  $("#mx").querySelectorAll("tbody tr").forEach(r => r.onclick = () => { S.histKey = r.dataset.k; renderHistory(); $("#histChart").scrollIntoView({behavior:"smooth", block:"center"}); });
+}
+
+/* ---------- render: body ---------- */
+function renderBody(){
+  const b = D.lastBody;
+  if (!b) { $("#bodyHero").innerHTML = `<div class="empty">No body scan yet. Upload one from the Reports tab.</div>`; $("#bodyTiles").innerHTML = ""; $("#bodyMx").innerHTML = ""; }
+  else {
+    const bp = Object.fromEntries((b.params||[]).map(p => [p.key, p]));
+    const sc = bp.body_score ? numVal(bp.body_score.value) : D.bodyScore;
+    const [lbl, col] = band(sc ?? 0);
+    const w = bp.weight ? numVal(bp.weight.value) : null, tw = bp.target_weight ? numVal(bp.target_weight.value) : null;
+    $("#bodyHero").innerHTML = `<div class="row" style="gap:24px;align-items:center">
+      <div><div class="eyebrow">Body score</div><div style="font-family:var(--f-display);font-size:3rem;font-weight:700;line-height:1;color:${col}">${sc ?? "—"}<span class="mono" style="font-size:.9rem;color:var(--muted)"> /100</span></div><div class="small" style="color:${col};font-weight:700">${sc == null ? "" : lbl}</div></div>
+      <div style="flex:1 1 260px;min-width:0"><h2>${esc(b.title || "Body composition scan")}</h2><div class="small muted">${fmtD(b.date)}${b.lab ? " · " + esc(b.lab) : ""}</div>
+      ${w && tw ? `<div class="small" style="margin-top:8px">Scan's suggested target is <b class="mono">${fmtN(tw)} kg</b>, ${fmtN(w - tw)} kg below today. ${bp.fat_mass ? `Most of that gap is fat mass (<b class="mono">${fmtN(numVal(bp.fat_mass.value))} kg</b> against a ${esc(bp.fat_mass.ref||"")} kg range); muscle is already in range.` : ""}</div>` : ""}</div></div>`;
+    $("#bodyDate").textContent = fmtD(b.date);
+    $("#bodyTiles").innerHTML = BODY_HERO.filter(k => bp[k]).map(k => { const p = bp[k], st = statusOf(p);
+      return `<div class="tile"><div class="k">${esc(p.name)}</div><div class="v">${fmtN(numVal(p.value) ?? p.value)} <small>${esc(p.unit)}</small></div><div>${st === "info" ? "" : chip(st)}</div><div class="r">${p.ref ? "Range " + esc(p.ref) : "&nbsp;"}</div></div>`; }).join("");
+    const scans = D.body; const keys = BODY.map(x => x[0]).filter(k => scans.some(s => (s.params||[]).some(p => p.key === k)));
+    $("#bodyMx").innerHTML = `<thead><tr><th>Measure</th>${scans.map(s => `<th>${fmtD(s.date)}</th>`).join("")}<th>Range</th></tr></thead><tbody>` +
+      keys.map(k => { let ref = "", nm = BODY.find(x => x[0] === k)[1]; return `<tr><td>${esc(nm)}</td>${scans.map(s => { const p = (s.params||[]).find(p => p.key === k); if (!p) return `<td class="c"><span class="muted">·</span></td>`; ref = p.ref || ref; const st = statusOf(p); return `<td class="c"><span class="${st}">${fmtN(numVal(p.value) ?? p.value)}${p.unit ? " " + esc(p.unit) : ""}</span></td>`; }).join("")}<td class="small muted">${esc(ref)}</td></tr>`; }).join("") + `</tbody>`;
+  }
+  // weight chart
+  const pts = [];
+  for (const s of D.body) { const p = (s.params||[]).find(p => p.key === "weight"); if (p) pts.push({x:s.date, y:numVal(p.value), series:"scan", color:"var(--accent)", label:"Body scan (measured)"}); }
+  for (const r of D.blood) if (r.vitals && r.vitals.weightKg) pts.push({x:r.date, y:r.vitals.weightKg, series:"self", hollow:true, dash:true, color:"var(--ink-2)", label:"Self-reported on lab form"});
+  for (const [d,v] of Object.entries(S.activity)) if (v && typeof v.w === "number") pts.push({x:d, y:v.w, series:"hk", color:"var(--ok)", label:"Apple Health / logged"});
+  lineChart($("#wtChart"), pts.filter(p => p.y != null), {unit:"kg", aria:"Weight over time", labelEnds:false});
+  const has = k => pts.some(p => p.series === k);
+  $("#wtLegend").innerHTML = [has("scan") && `<span class="row" style="gap:6px"><span class="dot" style="background:var(--accent)"></span>Body scan (measured)</span>`,
+    has("hk") && `<span class="row" style="gap:6px"><span class="dot" style="background:var(--ok)"></span>Apple Health / logged</span>`,
+    has("self") && `<span class="row" style="gap:6px"><span class="dot" style="border:2px solid var(--ink-2);background:var(--surface)"></span>Self-reported on lab forms</span>`].filter(Boolean).join("");
+}
+
+/* ---------- render: activity ---------- */
+function renderActivity(){
+  renderSyncCard(); renderVitals();
+  document.querySelectorAll("#actRange button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.r === S.actRange)));
+  const w = activityWindow(S.actRange);
+  const all = Object.keys(S.activity).filter(d => typeof S.activity[d]?.s === "number").sort();
+  if (!all.length) {
+    $("#actStats").innerHTML = ""; $("#stepChart").innerHTML = `<div class="empty">No step data yet. Use one of the three options below to bring in your Apple Health steps.</div>`;
+    $("#monthChart").innerHTML = `<div class="empty">Monthly averages appear once steps are imported.</div>`; $("#actNote").textContent = ""; return;
+  }
+  const have = w.list.filter(x => x.s != null); const hit = have.filter(x => x.s >= 10000).length;
+  const best = have.reduce((a,x) => x.s > (a?.s ?? -1) ? x : a, null);
+  let streak = 0; for (let i = w.list.length-1; i >= 0; i--) { if (w.list[i].s != null && w.list[i].s >= 10000) streak++; else if (i === w.list.length-1 && w.list[i].s == null) continue; else break; }
+  const kc = have.filter(x => x.k != null);
+  const tile = (k, v, r) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="r">${r}</div></div>`;
+  $("#actStats").innerHTML = tile("Average per day", Math.round(w.avg).toLocaleString("en-IN"), `${w.days} of ${S.actRange} days logged`) +
+    tile("Days at 10k+", `${hit}`, have.length ? `${Math.round(hit/have.length*100)}% of logged days` : "") +
+    tile("Best day", best ? best.s.toLocaleString("en-IN") : "—", best ? fmtD(best.d) : "") +
+    tile("Current 10k streak", `${streak} day${streak === 1 ? "" : "s"}`, "Consecutive days ≥ 10,000") +
+    (kc.length ? tile("Active energy", Math.round(kc.reduce((a,x) => a + x.k, 0)/kc.length).toLocaleString("en-IN") + " <small>kcal/day</small>", "Average, from Apple Health") : "");
+  if (S.actRange <= 90) barChart($("#stepChart"), w.list.map(x => ({d:x.d, v:x.s})), {goal:10000, unit:"steps", aria:"Daily steps", xl: x => { const d = pd(x.d); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; }, tl: x => fmtD(x.d)});
+  else { // weekly bars for a year
+    const wk = []; for (let i = 0; i < w.list.length; i += 7) { const sl = w.list.slice(i, i+7).filter(x => x.s != null); wk.push({d:w.list[i].d, v: sl.length ? sl.reduce((a,x) => a + x.s, 0)/sl.length : null}); }
+    barChart($("#stepChart"), wk, {goal:10000, unit:"steps/day avg", aria:"Weekly average steps", xl: x => fmtShort(x.d), tl: x => "Week of " + fmtD(x.d)});
+  }
+  $("#actNote").textContent = w.asOf ? `No steps logged in the last ${S.actRange} days, so this shows the ${S.actRange} days up to ${fmtD(w.end)}. Import fresh data below.` : `Last logged day: ${fmtD(all[all.length-1])}. Green bars hit the 10,000-step goal.`;
+  const months = {}; for (const d of all) { const m = d.slice(0,7); (months[m] ||= []).push(S.activity[d].s); }
+  const ml = Object.keys(months).sort().map(m => ({d:m, v: months[m].reduce((a,b) => a + b, 0)/months[m].length}));
+  barChart($("#monthChart"), ml, {goal:10000, unit:"steps/day", h:200, aria:"Monthly average steps", xl: x => fmtShort(x.d + "-01"), tl: x => { const d = pd(x.d + "-01"); return `${MON[d.getUTCMonth()]} ${d.getUTCFullYear()} (${months[x.d].length} days)`; }});
+}
+
+/* ---------- render: reports ---------- */
+function renderHeader(){
+  const n = S.reports.length;
+  $("#lastUpdated").textContent = !S.loadedR ? "Loading your records…" : n ? `${n} reports · latest ${fmtD(S.reports.map(r => r.date).sort().pop())}` : "No reports yet";
+}
+function renderAll(){ derive(); renderHeader(); renderOverview(); renderResults(); if (S.tab === "history") renderHistory(); if (S.tab === "body") renderBody(); if (S.tab === "activity") renderActivity(); if (S.tab === "settings") renderSettings(); renderReports(); }
+
+/* ---------- tabs ---------- */
+function go(tab, anchor){
+  S.tab = tab;
+  document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === tab)));
+  document.querySelectorAll("section.view").forEach(s => s.hidden = s.id !== "v-" + tab);
+  if (tab === "history") renderHistory(); if (tab === "body") renderBody(); if (tab === "activity") renderActivity(); if (tab === "settings") renderSettings();
+  try { localStorage.setItem("hl-tab", tab); } catch(e) {}
+  if (anchor) { const el = document.getElementById("cat-" + anchor); if (el) setTimeout(() => el.scrollIntoView({behavior:"smooth", block:"start"}), 30); }
+  else window.scrollTo({top:0});
+}
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => go(t.dataset.tab));
+$("#resSearch").oninput = e => { S.resQ = e.target.value; renderResults(); };
+$("#resFlagged").onclick = e => { S.resFlagged = !S.resFlagged; e.target.setAttribute("aria-pressed", S.resFlagged); renderResults(); };
+$("#resAll").onclick = e => { S.resAll = !S.resAll; e.target.setAttribute("aria-pressed", S.resAll); renderResults(); };
+document.querySelectorAll("#actRange button").forEach(b => b.onclick = () => { S.actRange = +b.dataset.r; renderActivity(); });
+let rT; window.addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(() => { if (S.tab === "history") renderHistory(); if (S.tab === "body") renderBody(); if (S.tab === "activity") renderActivity(); }, 150); });
+function toastMsg(sel, html, bad){ const el = $(sel); el.innerHTML = html; el.style.color = bad ? "var(--bad)" : ""; }
+function notice(html){ const n = $("#globalNotice"); n.innerHTML = html; n.hidden = !html; }
+
+/* ---------- ask Claude ---------- */
+function summaryForClaude(){
+  const lines = [];
+  for (const k in D.series) { const s = D.series[k]; const p = s[s.length-1].p; if (INFO_KEYS.has(k)) continue;
+    lines.push(`${p.name} [${catName(p.cat)}]: ` + s.map(e => `${e.date}=${e.p.value}`).join(", ") + ` ${p.unit||""} (ref ${p.ref||"?"}; latest ${STLABEL[statusOf(p)]})`); }
+  if (D.lastBody) lines.push("Body scan " + D.lastBody.date + ": " + (D.lastBody.params||[]).map(p => `${p.name} ${p.value}${p.unit ? " " + p.unit : ""}${p.ref ? " (ref " + p.ref + ")" : ""}`).join("; "));
+  const w = activityWindow(30); if (w.days) lines.push(`Steps: ${Math.round(w.avg)} per day average over ${w.days} logged days ending ${w.end}`);
+  lines.push(`Dashboard scores: overall ${D.overall}, bloodwork ${D.bloodScore}, body ${D.bodyScore}, activity ${D.actScore ?? "n/a"}`);
+  return lines.join("\n");
+}
+/* Apple Health export.xml / export.zip, streamed so large files don't freeze the page */
+function loadScript(src){ return new Promise((res, rej) => { if (document.querySelector(`script[src="${src}"]`)) return res(); const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("Couldn't load " + src)); document.head.appendChild(s); }); }
+$("#hkFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const since = $("#hkSince").value || "2000-01-01";
+  const prog = $("#hkProg"), bar = prog.querySelector("i"); prog.hidden = false; bar.style.width = "0%";
+  toastMsg("#hkMsg", "Reading your Health export… large files take a minute.");
+  const agg = {}; // type|date|source -> {sum,n}
+  const re = /<Record type="HKQuantityTypeIdentifier(StepCount|ActiveEnergyBurned|RestingHeartRate|BodyMass)"([^>]*)>/g;
+  const attr = (s, n) => { const m = s.match(new RegExp(n + '="([^"]*)"')); return m ? m[1] : null; };
+  const scan = chunk => { let m; re.lastIndex = 0; while ((m = re.exec(chunk))) { const a = m[2]; const sd = attr(a, "startDate"); if (!sd) continue; const d = sd.slice(0,10); if (d < since) continue;
+      let v = parseFloat(attr(a, "value")); if (isNaN(v)) continue; const unit = attr(a, "unit") || ""; if (m[1] === "BodyMass" && unit === "lb") v *= 0.453592; if (m[1] === "ActiveEnergyBurned" && unit === "kJ") v /= 4.184;
+      const key = m[1] + "|" + d + "|" + (attr(a, "sourceName") || ""); const o = agg[key] ||= {sum:0, n:0, last:0}; o.sum += v; o.n++; o.last = v; } };
+  try {
+    let carry = "";
+    const feed = text => { const t = carry + text; const i = t.lastIndexOf(">"); if (i < 0) { carry = t; return; } scan(t.slice(0, i+1)); carry = t.slice(i+1); };
+    if (/\.zip$/i.test(f.name) || f.type.includes("zip")) {
+      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js");
+      const zip = await JSZip.loadAsync(f);
+      const entry = Object.values(zip.files).find(z => /(^|\/)export\.xml$/.test(z.name)) || Object.values(zip.files).find(z => /\.xml$/.test(z.name) && !/cda/i.test(z.name));
+      if (!entry) throw new Error("No export.xml inside this zip.");
+      const dec = new TextDecoder();
+      await new Promise((res, rej) => { entry.internalStream("uint8array").on("data", (c, meta) => { feed(dec.decode(c, {stream:true})); bar.style.width = (meta.percent||0) + "%"; }).on("error", rej).on("end", res).resume(); });
+    } else {
+      const reader = f.stream().getReader(); const dec = new TextDecoder(); let read = 0;
+      for (;;) { const {done, value} = await reader.read(); if (done) break; read += value.byteLength; feed(dec.decode(value, {stream:true})); bar.style.width = (read / f.size * 100).toFixed(1) + "%"; }
+    }
+    // per day: steps & energy = the single source with the highest total (avoids iPhone + Watch double counting)
+    const days = {};
+    const best = {}; for (const [k,o] of Object.entries(agg)) { const [t,d] = k.split("|"); const id = t + "|" + d; const val = t === "RestingHeartRate" ? o.sum/o.n : t === "BodyMass" ? o.last : o.sum; if (!(id in best) || (t !== "RestingHeartRate" && t !== "BodyMass" && val > best[id])) best[id] = val; }
+    for (const [id,v] of Object.entries(best)) { const [t,d] = id.split("|"); const o = days[d] ||= {src:"apple-health"}; if (t === "StepCount") o.s = Math.round(v); else if (t === "ActiveEnergyBurned") o.k = Math.round(v); else if (t === "RestingHeartRate") o.h = Math.round(v); else if (t === "BodyMass") o.w = Math.round(v*10)/10; }
+    const n = Object.keys(days).length; if (!n) throw new Error(`No steps found on or after ${fmtD(since)}.`);
+    toastMsg("#hkMsg", `Found ${n} days. Saving…`);
+    await mergeActivity(days);
+    toastMsg("#hkMsg", `Imported ${n} days from Apple Health.`); bar.style.width = "100%";
+  } catch (err) { toastMsg("#hkMsg", "Import stopped: " + esc(err.message || err.code), true); }
+  finally { e.target.value = ""; setTimeout(() => prog.hidden = true, 1500); }
+};
+
+/* ---------- report upload ---------- */
+const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+async function pdfLib(){ await loadScript(PDFJS + "pdf.worker.min.js"); await loadScript(PDFJS + "pdf.min.js"); window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + "pdf.worker.min.js"; return window.pdfjsLib; }
+async function readPdf(file, onStep){
+  const lib = await pdfLib(); const doc = await lib.getDocument({data: await file.arrayBuffer()}).promise;
+  const pages = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    onStep?.(i, doc.numPages);
+    const pg = await doc.getPage(i); const tc = await pg.getTextContent();
+    const rows = {}; for (const it of tc.items) { if (!it.str || !it.str.trim()) continue; const y = Math.round(it.transform[5] / 3); (rows[y] ||= []).push({x: it.transform[4], s: it.str.trim()}); }
+    const lines = Object.keys(rows).map(Number).sort((a,b) => b-a).map(y => rows[y].sort((a,b) => a.x-b.x).map(o => o.s).join(" | "));
+    pages.push(lines.join("\n"));
+  }
+  return {doc, pages};
+}
+async function renderPages(doc, max){
+  const blobs = [];
+  for (let i = 1; i <= Math.min(doc.numPages, max); i++) {
+    const pg = await doc.getPage(i); const vp = pg.getViewport({scale: 1.7}); const c = document.createElement("canvas"); c.width = vp.width; c.height = vp.height;
+    await pg.render({canvasContext: c.getContext("2d"), viewport: vp}).promise;
+    blobs.push(await new Promise(r => c.toBlob(r, "image/jpeg", 0.85)));
+  }
+  return blobs;
+}
+function extractionPrompt(text, isImage){
+  return `Extract every measured value from this ${isImage ? "attached report" : "report text"} (an Indian lab blood test, or a gym body-composition scan).
+Reply with ONLY one JSON object:
+{"kind":"blood"|"body","date":"YYYY-MM-DD","lab":"lab or gym name","bookingId":"string or empty","title":"short title e.g. Full body checkup","weightKg":number|null,"params":[{"key":"","name":"","cat":"","value":0,"unit":"","low":null,"high":null,"ref":""}]}
+Rules:
+- date = sample collection date (blood) or scan date (body).
+- For blood tests, use these keys when the test matches (key|name|category): ${CATALOG.map(c => c.join("|")).join("; ")}. For a test not in the list, invent a short snake_case key and pick the closest category from: ${Object.keys(CATS).join(", ")}.
+- For body scans use cat "body" and these keys: ${BODY.map(b => b[0] + "|" + b[1]).join("; ")}. Include the scan's own overall score as body_score.
+- value is a number; keep "<10"-style values as a string. low/high are numbers from the report's reference interval (null when one side is open, e.g. "<200" gives low null, high 200). ref is the interval as printed, shortened.
+- Skip qualitative urine results that are normal, comments, interpretation tables and repeated historical values from charts (only this report's own results).
+- weightKg: the patient's weight if the report states it, else null.
+${isImage ? "" : "\nREPORT TEXT:\n" + text}`;
+}
+let pending = null; // {file, draft}
+$("#upFile").onchange = e => { const f = e.target.files[0]; e.target.value = ""; if (f) handleUpload(f); };
+const drop = $("#drop");
+drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) handleUpload(f); });
+$("#manualBtn").onclick = () => openReview(null, {kind:"blood", date:todayISO(), lab:"", bookingId:"", title:"", params:[]});
+
+function openReview(file, draft){
+  pending = {file, draft};
+  const kind = draft.kind === "body" ? "body" : "blood";
+  const dup = draft.bookingId && S.reports.find(r => r.bookingId && String(r.bookingId) === String(draft.bookingId));
+  const catOpts = sel => [...Object.keys(CATS), "body"].map(c => `<option value="${c}" ${c === sel ? "selected" : ""}>${c === "body" ? "Body scan" : esc(CATS[c].name)}</option>`).join("");
+  const rowHTML = p => `<tr><td><input data-f="name" value="${esc(p.name||"")}" aria-label="Test name"><input data-f="key" type="hidden" value="${esc(p.key||"")}"></td>
+    <td><input data-f="value" value="${esc(p.value ?? "")}" aria-label="Value" style="font-family:var(--f-mono)"></td><td><input data-f="unit" value="${esc(p.unit||"")}" aria-label="Unit"></td>
+    <td><input data-f="low" value="${esc(p.low ?? "")}" aria-label="Range low" style="font-family:var(--f-mono)"></td><td><input data-f="high" value="${esc(p.high ?? "")}" aria-label="Range high" style="font-family:var(--f-mono)"></td>
+    <td><select data-f="cat" aria-label="Category">${catOpts(p.cat || (kind === "body" ? "body" : "other"))}</select></td><td class="x"><button class="iconbtn" data-rm title="Remove row" aria-label="Remove row">✕</button></td></tr>`;
+  $("#sheetRoot").innerHTML = `<div class="sheet-bg"><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rvT">
+    <div class="card-h" style="margin:0"><h2 id="rvT">Check before saving</h2><button class="iconbtn" id="rvX" aria-label="Close">✕</button></div>
+    ${dup ? `<div class="notice" style="background:var(--warn-bg)">A report with booking ID ${esc(draft.bookingId)} is already saved (${fmtD(dup.date)}). Saving again will add a duplicate.</div>` : ""}
+    <div class="grid g3" style="gap:10px">
+      <label class="small">Type<br><select id="rvKind" style="width:100%"><option value="blood" ${kind === "blood" ? "selected" : ""}>Blood test</option><option value="body" ${kind === "body" ? "selected" : ""}>Body scan</option></select></label>
+      <label class="small">Test date<br><input type="date" id="rvDate" value="${esc(draft.date || todayISO())}" style="width:100%"></label>
+      <label class="small">Lab / gym<br><input type="text" id="rvLab" value="${esc(draft.lab || "")}" style="width:100%"></label>
+      <label class="small">Title<br><input type="text" id="rvTitle" value="${esc(draft.title || "")}" style="width:100%"></label>
+      <label class="small">Booking ID<br><input type="text" id="rvBook" value="${esc(draft.bookingId || "")}" style="width:100%"></label>
+      <label class="small">Weight on report, kg<br><input type="number" step="0.1" id="rvWt" value="${esc(draft.weightKg ?? "")}" style="width:100%"></label>
+    </div>
+    ${file ? `<div class="small muted">File: ${esc(file.name)} (${(file.size/1048576).toFixed(1)} MB) will be kept with this report.</div>` : ""}
+    <div style="overflow-x:auto"><table class="rv-table"><thead><tr><th>Test</th><th>Value</th><th>Unit</th><th>Low</th><th>High</th><th>Group</th><th></th></tr></thead><tbody id="rvBody">${(draft.params||[]).map(rowHTML).join("")}</tbody></table></div>
+    <div class="row"><button class="btn" id="rvAdd">Add a row</button><span class="small muted">${(draft.params||[]).length} values</span></div>
+    <div class="row" style="justify-content:flex-end"><span class="small" id="rvMsg"></span><button class="btn" id="rvCancel">Cancel</button><button class="btn primary" id="rvSave">Save report</button></div>
+  </div></div>`;
+  const close = () => { $("#sheetRoot").innerHTML = ""; pending = null; };
+  $("#rvX").onclick = close; $("#rvCancel").onclick = close;
+  $("#rvBody").onclick = e => { if (e.target.closest("[data-rm]")) e.target.closest("tr").remove(); };
+  $("#rvAdd").onclick = () => { $("#rvBody").insertAdjacentHTML("beforeend", rowHTML({cat: $("#rvKind").value === "body" ? "body" : "other"})); };
+  $("#rvSave").onclick = saveReview;
+}
+const slug = s => String(s||"").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "x";
+const toNum = s => { const t = String(s ?? "").trim(); if (t === "") return null; const n = Number(t); return isNaN(n) ? null : n; };
+
+/* ================= Supabase + Claude layer ================= */
+const CLAUDE_MODEL = "claude-sonnet-5-5";
+const CFG = (() => {
+  const c = window.HEALTH_LEDGER_CONFIG || {};
+  let url = (c.supabaseUrl || "").trim(), key = (c.supabaseAnonKey || "").trim();
+  try { url = url || localStorage.getItem("hl-sb-url") || ""; key = key || localStorage.getItem("hl-sb-key") || ""; } catch (e) {}
+  return { url: url.replace(/\/+$/, ""), key };
+})();
+let SB = null;
+S.uid = null; S.email = null; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] };
+
+async function fetchAllHealth(){
+  const out = {}; const n = v => v == null ? null : Number(v);
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await SB.from("health_daily").select("day,steps,active_kcal,resting_hr,hrv_ms,weight_kg,sleep_h,source,updated_at").order("day").range(from, from + 999);
+    if (error) throw error;
+    for (const x of data) out[x.day] = { s: n(x.steps), k: n(x.active_kcal), h: n(x.resting_hr), hrv: n(x.hrv_ms), w: n(x.weight_kg), sl: n(x.sleep_h), src: x.source, at: x.updated_at };
+    if (data.length < 1000) break;
+  }
+  return out;
+}
+let loading = false;
+async function loadAll(){
+  if (!SB || !S.uid || loading) return; loading = true;
+  const btn = $("#refreshBtn"); btn?.classList.add("spin");
+  try {
+    const [r, h, st, k] = await Promise.all([
+      SB.from("reports").select("id,type,date,doc,file_path").order("date", { ascending: false }),
+      fetchAllHealth(),
+      SB.from("user_settings").select("*").maybeSingle(),
+      SB.from("ingest_keys").select("key,created_at,last_used").order("created_at")
+    ]);
+    if (r.error) throw r.error;
+    S.reports = r.data.map(x => ({ ...x.doc, id: x.id, type: x.type, date: x.date, filePath: x.file_path }));
+    S.activity = h;
+    S.settings = st.data || {};
+    S.sync.keys = k.data || [];
+    S.sync.lastUsed = S.sync.keys.map(x => x.last_used).filter(Boolean).sort().pop() || null;
+    S.loadedR = S.loadedA = true;
+    notice("");
+    renderAll();
+  } catch (e) {
+    notice("Couldn't load your data: " + esc(e.message || e.code || e) + ". Check your connection and tap refresh.");
+  } finally { loading = false; btn?.classList.remove("spin"); }
+}
+
+/* ---- activity writes (Apple export import + manual log) ---- */
+async function mergeActivity(days){
+  if (!SB || !S.uid) throw { message: "Not signed in" };
+  const map = { s: "steps", k: "active_kcal", h: "resting_hr", hrv: "hrv_ms", w: "weight_kg", sl: "sleep_h" };
+  const groups = {};
+  for (const [d, v] of Object.entries(days)) {
+    const row = { user_id: S.uid, day: d, source: v.src || "manual", updated_at: new Date().toISOString() };
+    for (const [a, b] of Object.entries(map)) if (v[a] != null) row[b] = v[a];
+    const sig = Object.keys(row).sort().join(",");
+    (groups[sig] ||= []).push(row);
+  }
+  let n = 0;
+  for (const rows of Object.values(groups)) for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await SB.from("health_daily").upsert(chunk, { onConflict: "user_id,day" });
+    if (error) throw error; n += chunk.length;
+  }
+  S.activity = await fetchAllHealth(); renderAll();
+  return n;
+}
+$("#manDate").value = todayISO();
+$("#manBtn").onclick = async () => {
+  const d = $("#manDate").value, s = parseInt($("#manSteps").value, 10), w = parseFloat($("#manWt").value);
+  if (!d || (isNaN(s) && isNaN(w))) return toastMsg("#manMsg", "Enter a date and steps or weight.", true);
+  const v = { src: "manual" }; if (!isNaN(s)) v.s = s; if (!isNaN(w)) v.w = w;
+  try { await mergeActivity({ [d]: v }); toastMsg("#manMsg", "Saved."); $("#manSteps").value = ""; $("#manWt").value = ""; }
+  catch (e) { toastMsg("#manMsg", "Couldn't save: " + esc(e.message || e.code), true); }
+};
+
+/* ---- reports: files, save, delete ---- */
+async function uploadReportFile(id, file){
+  const ext = ((file.name.split(".").pop() || "pdf").toLowerCase()).replace(/[^a-z0-9]/g, "") || "pdf";
+  const path = `${S.uid}/${id}.${ext}`;
+  const { error } = await SB.storage.from("reports").upload(path, file, { upsert: true, contentType: file.type || (ext === "pdf" ? "application/pdf" : "image/jpeg") });
+  if (error) throw error;
+  return path;
+}
+async function saveReportRow(doc, file){
+  const path = file ? await uploadReportFile(doc.id, file) : null;
+  const { error } = await SB.from("reports").insert({ id: doc.id, type: doc.type, date: doc.date, doc: { ...doc, fileName: file ? file.name : null }, file_path: path });
+  if (error) { if (path) await SB.storage.from("reports").remove([path]); throw error; }
+}
+async function openFile(path){
+  const w = window.open("", "_blank");
+  const { data, error } = await SB.storage.from("reports").createSignedUrl(path, 3600);
+  if (error || !data) { w?.close(); toastMsg("#upMsg", "Couldn't open the file: " + esc(error?.message || "unknown error"), true); go("reports"); return; }
+  if (w) w.location.href = data.signedUrl; else location.href = data.signedUrl;
+}
+function attachFile(id){
+  const inp = document.createElement("input"); inp.type = "file"; inp.accept = "application/pdf,image/jpeg,image/png";
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    toastMsg("#upMsg", "Attaching " + esc(f.name) + "…");
+    try {
+      const path = await uploadReportFile(id, f);
+      const r = S.reports.find(x => x.id === id);
+      const { id: _i, filePath: _f, ...doc } = r || {};
+      const { error } = await SB.from("reports").update({ file_path: path, doc: { ...doc, id, fileName: f.name } }).eq("id", id);
+      if (error) throw error;
+      toastMsg("#upMsg", "File attached."); await loadAll();
+    } catch (e) { toastMsg("#upMsg", "Couldn't attach: " + esc(e.message || e), true); }
+  };
+  inp.click();
+}
+
+function renderReports(){
+  const list = S.reports.slice().sort((a,b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  $("#repCount").textContent = list.length ? `${list.length} report${list.length > 1 ? "s" : ""} · ${fmtShort(list[list.length-1].date)} to ${fmtShort(list[0].date)}` : "";
+  $("#repList").innerHTML = list.length ? list.map(r => {
+    const ps = r.params || []; const fl = ps.filter(p => isScored(p) && ["out","border"].includes(statusOf(p))).length; const d = pd(r.date);
+    return `<div class="rep" data-id="${esc(r.id)}"><div class="date"><b>${d.getUTCDate()} ${MON[d.getUTCMonth()]}</b>${d.getUTCFullYear()}</div>
+      <div style="min-width:0"><div class="t">${esc(r.title || (r.type === "body" ? "Body composition scan" : "Blood test"))}</div>
+        <div class="m">${chip(r.type === "body" ? "info" : fl ? "border" : "ok", r.type === "body" ? "Body scan" : "Blood test")} ${esc(r.lab || "")}${r.bookingId ? " · Booking " + esc(r.bookingId) : ""} · ${ps.length} values${r.type === "blood" ? ` · ${fl} flagged` : ""}${r.fileName && r.filePath ? ` · ${esc(r.fileName)}` : ""}</div></div>
+      <div class="acts">${r.filePath ? `<button class="btn" data-act="open">Open file</button>` : `<button class="btn" data-act="attach">Attach file</button>`}
+        <button class="btn" data-act="del">Delete</button></div></div>`; }).join("") : `<div class="empty">Your reports will be listed here, newest first.</div>`;
+  $("#repList").querySelectorAll("[data-act=open]").forEach(b => b.onclick = () => { const r = S.reports.find(x => x.id === b.closest(".rep").dataset.id); if (r?.filePath) openFile(r.filePath); });
+  $("#repList").querySelectorAll("[data-act=attach]").forEach(b => b.onclick = () => attachFile(b.closest(".rep").dataset.id));
+  $("#repList").querySelectorAll("[data-act=del]").forEach(b => b.onclick = () => {
+    const row = b.closest(".rep"); const id = row.dataset.id; const acts = row.querySelector(".acts");
+    acts.innerHTML = `<span class="small">Delete this report and its file?</span><button class="btn danger" data-y>Delete</button><button class="btn" data-n>Keep</button>`;
+    acts.querySelector("[data-n]").onclick = renderReports;
+    acts.querySelector("[data-y]").onclick = async () => { const r = S.reports.find(x => x.id === id);
+      try { const { error } = await SB.from("reports").delete().eq("id", id); if (error) throw error;
+        if (r?.filePath) await SB.storage.from("reports").remove([r.filePath]);
+        toastMsg("#upMsg", "Report deleted."); await loadAll(); }
+      catch (e) { acts.innerHTML = `<span class="small" style="color:var(--bad)">Couldn't delete (${esc(e.message || e.code)}). Try again.</span>`; } };
+  });
+}
+
+/* ---- Claude API (your own key) ---- */
+async function claudeCall(content, { maxTokens = 2000 } = {}){
+  const key = S.settings.anthropic_key;
+  if (!key) throw { code: "no_key", message: "Add your Claude API key in Settings first." };
+  let res;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: maxTokens, messages: [{ role: "user", content }] }) });
+  } catch (e) { throw { code: "network", message: "Couldn't reach Claude. Check your internet connection." }; }
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw { code: "api_" + res.status, message: res.status === 401 ? "Claude rejected the API key. Check it in Settings." : res.status === 429 ? "Claude is rate-limiting this key. Wait a minute and try again." : (j?.error?.message || "Claude API error " + res.status) };
+  if (j.stop_reason === "max_tokens") j.truncated = true;
+  return { text: (j.content || []).filter(b => b.type === "text").map(b => b.text).join(""), truncated: !!j.truncated };
+}
+function parseJSONLoose(t){
+  try { return JSON.parse(t); } catch (e) {}
+  const f = t.match(/```(?:json)?\s*([\s\S]*?)```/); if (f) { try { return JSON.parse(f[1]); } catch (e) {} }
+  const a = t.indexOf("{"), b = t.lastIndexOf("}"); if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) {} }
+  return null;
+}
+const toB64 = file => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1]); r.onerror = () => rej(r.error); r.readAsDataURL(file); });
+
+let asking = false;
+async function ask(){
+  const q = $("#askQ").value.trim(); if (!q) { $("#askQ").focus(); return; }
+  if (asking) return; asking = true;
+  $("#askBtn").disabled = true; $("#askOut").textContent = "Thinking…";
+  const about = (S.settings.about || "").trim();
+  const prompt = `You are helping a person understand their own lab history.${about ? " About them: " + about + "." : ""} Be direct, specific to THEIR numbers and trends, and practical. Use short paragraphs or a short list; under 220 words. Reference actual values and dates. Do not diagnose; say when something needs a doctor. Plain text only, no markdown headings or tables.\n\nTHEIR DATA (all tests, oldest to newest):\n${summaryForClaude()}\n\nQUESTION: ${q}`;
+  try { const { text } = await claudeCall([{ type: "text", text: prompt }], { maxTokens: 1200 }); $("#askOut").textContent = text.replace(/\*\*/g, ""); }
+  catch (e) { $("#askOut").textContent = e.message || "Couldn't get an answer right now."; }
+  finally { $("#askBtn").disabled = false; asking = false; }
+}
+$("#askBtn").onclick = ask; $("#askQ").onkeydown = e => { if (e.key === "Enter") ask(); };
+
+/* ---- report upload: read with Claude, review, save ---- */
+async function handleUpload(file){
+  const prog = $("#upProg"), bar = prog.querySelector("i"); const step = (p, msg) => { prog.hidden = false; bar.style.width = p + "%"; toastMsg("#upMsg", msg); };
+  if (file.size > 30*1024*1024) return toastMsg("#upMsg", "That file is over 30 MB. Export a smaller PDF (or just the results pages) and try again.", true);
+  if (!S.settings.anthropic_key) {
+    toastMsg("#upMsg", `Claude can read reports for you once your API key is saved in <a href="#settings">Settings</a>. For now, enter the values by hand; the file is still kept.`);
+    return openReview(file, { kind: "blood", date: todayISO(), params: [] });
+  }
+  let timer;
+  try {
+    let content;
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    if (isPdf) {
+      step(5, "Opening PDF…");
+      const { pages } = await readPdf(file, (i, n) => step(5 + i/n*25, `Reading page ${i} of ${n}…`));
+      const keep = pages.filter(p => /Bio\.? ?Ref|Reference|Test Name|Result|mg\/dl|g\/dL|U\/L|ng\/ml|Body Composition|Fat Mass|Skeletal/i.test(p));
+      let text = (keep.length ? keep : pages).join("\n\n=== page ===\n\n").replace(/[ \t]+/g, " ");
+      if (text.replace(/\s|\|/g, "").length < 300) {
+        step(32, "This PDF is a scanned image; sending the pages to Claude…");
+        content = [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: await toB64(file) } }, { type: "text", text: extractionPrompt("", true) }];
+      } else {
+        if (text.length > 400000) text = text.slice(0, 400000);
+        content = [{ type: "text", text: extractionPrompt(text, false) }];
+      }
+    } else if (/^image\/(jpeg|png|webp|gif)$/.test(file.type)) {
+      content = [{ type: "image", source: { type: "base64", media_type: file.type, data: await toB64(file) } }, { type: "text", text: extractionPrompt("", true) }];
+    } else throw { message: "Upload a PDF, JPG or PNG." };
+    step(40, "Claude is reading the values… this takes 20–60 seconds.");
+    let p = 40; timer = setInterval(() => { p = Math.min(95, p + 1.2); bar.style.width = p + "%"; }, 700);
+    const { text, truncated } = await claudeCall(content, { maxTokens: 16000 });
+    clearInterval(timer);
+    const draft = parseJSONLoose(text);
+    if (!draft || !Array.isArray(draft.params)) throw { code: "invalid_json", message: truncated ? "The report was too long to read in one go. Try uploading just the results pages." : "Claude couldn't turn this file into a list of values. Try again, or enter them by hand." };
+    step(100, `Found ${draft.params.length} values. Check them below.`);
+    openReview(file, draft);
+  } catch (e) {
+    clearInterval(timer); prog.hidden = true;
+    toastMsg("#upMsg", esc(e.message || "Something went wrong reading this file.") + ` <button class="btn" id="upManual">Enter by hand</button>`, true);
+    $("#upManual").onclick = () => openReview(file, { kind: "blood", date: todayISO(), params: [] });
+  }
+}
+
+async function saveReview(){
+  const btn = $("#rvSave"); btn.disabled = true;
+  try {
+    const kind = $("#rvKind").value, date = $("#rvDate").value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw { message: "Set the test date." };
+    const nameToKey = Object.fromEntries([...CATALOG.map(c => [c[1].toLowerCase(), c[0]]), ...BODY.map(b => [b[1].toLowerCase(), b[0]])]);
+    const params = [...$("#rvBody").querySelectorAll("tr")].map(tr => { const g = f => tr.querySelector(`[data-f=${f}]`).value.trim();
+      const name = g("name"); if (!name || g("value") === "") return null; const vn = toNum(g("value")); const lo = toNum(g("low")), hi = toNum(g("high"));
+      const cat = g("cat"); const key = g("key") || nameToKey[name.toLowerCase()] || slug(name);
+      const p = { key, name, cat: kind === "body" ? "body" : (cat === "body" ? "other" : cat), value: vn != null ? vn : g("value"), unit: g("unit"), low: lo, high: hi,
+        ref: lo != null && hi != null ? `${lo} - ${hi}` : hi != null ? `<${hi}` : lo != null ? `>${lo}` : "" };
+      const orig = (pending?.draft?.params || []).find(x => x.key === key && x.name === name); if (orig?.ref && orig.low === lo && orig.high === hi) p.ref = orig.ref;
+      if (INFO_KEYS.has(key)) p.scored = 0; return p; }).filter(Boolean);
+    if (!params.length) throw { message: "Add at least one value." };
+    const wt = toNum($("#rvWt").value);
+    if (kind === "body" && wt && !params.some(p => p.key === "weight")) params.push({ key: "weight", name: "Weight", cat: "body", value: wt, unit: "kg", low: null, high: null, ref: "" });
+    const id = `${date}-${kind}-${Math.random().toString(36).slice(2,7)}`;
+    const doc = { id, type: kind, date, lab: $("#rvLab").value.trim(), title: $("#rvTitle").value.trim() || (kind === "body" ? "Body composition scan" : "Blood test"),
+      bookingId: $("#rvBook").value.trim(), uploadedAt: new Date().toISOString(), params };
+    if (kind === "blood" && wt) doc.vitals = { weightKg: wt, selfReported: true };
+    toastMsg("#rvMsg", pending?.file ? "Uploading file and saving…" : "Saving…");
+    await saveReportRow(doc, pending?.file || null);
+    $("#sheetRoot").innerHTML = ""; pending = null;
+    toastMsg("#upMsg", `Saved ${kind === "body" ? "body scan" : "blood test"} from ${fmtD(date)} with ${params.length} values.`); $("#upProg").hidden = true;
+    await loadAll();
+  } catch (e) {
+    toastMsg("#rvMsg", esc(e.message || e.code || "Couldn't save."), true); btn.disabled = false;
+  }
+}
+
+/* ---- activity: sync card + sleep & heart ---- */
+const ago = iso => { if (!iso) return "never"; const m = (Date.now() - new Date(iso).getTime()) / 60000; if (m < 2) return "just now"; if (m < 60) return Math.round(m) + " min ago"; if (m < 48*60) return Math.round(m/60) + " h ago"; return Math.round(m/1440) + " days ago"; };
+function renderSyncCard(){
+  const last = S.sync.lastUsed; const fresh = last && (Date.now() - new Date(last)) < 36*3600e3;
+  const days = Object.keys(S.activity).filter(d => S.activity[d]?.s != null).sort();
+  $("#syncCard").innerHTML = !S.sync.keys.length
+    ? `<div class="row" style="justify-content:space-between"><div><span class="sync-dot" style="background:var(--muted)"></span><b>Apple Health isn't connected yet.</b><div class="small muted">Set up Health Auto Export once and your steps, sleep, heart rate and weight arrive on their own.</div></div><a class="btn primary" href="#settings">Connect Apple Health</a></div>`
+    : `<div class="row" style="justify-content:space-between"><div><span class="sync-dot" style="background:${fresh ? "var(--ok)" : "var(--warn)"}"></span><b>${fresh ? "Syncing from Apple Health" : last ? "Apple Health sync is behind" : "Waiting for the first sync"}</b>
+        <div class="small muted">Last delivery ${ago(last)}${days.length ? ` · latest day ${fmtD(days[days.length-1])}` : ""}${!fresh && last ? " · open Health Auto Export on your phone to nudge it" : ""}</div></div><a class="btn" href="#settings">Sync settings</a></div>`;
+}
+function renderVitals(){
+  const end = todayISO(), start = iso(new Date(pd(end) - 89*864e5));
+  const days = Object.keys(S.activity).filter(d => d >= start && d <= end).sort();
+  const pick = f => days.map(d => ({ x: d, y: S.activity[d][f] })).filter(p => p.y != null);
+  const sl = pick("sl"), hr = pick("h"), hv = pick("hrv"), wt = pick("w");
+  const avg = a => a.length ? a.reduce((s, p) => s + p.y, 0) / a.length : null;
+  const last7 = a => avg(a.filter(p => p.x >= iso(new Date(pd(end) - 6*864e5))));
+  const tile = (k, v, r) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="r">${r}</div></div>`;
+  $("#vitStats").innerHTML =
+    tile("Sleep", sl.length ? fmtN(avg(sl), 1) + " <small>h/night</small>" : "—", sl.length ? `7-day: ${fmtN(last7(sl) ?? avg(sl), 1)} h · aim for 7–9` : "No sleep data yet") +
+    tile("Resting heart rate", hr.length ? fmtN(avg(hr), 0) + " <small>bpm</small>" : "—", hr.length ? `7-day: ${fmtN(last7(hr) ?? avg(hr), 0)} bpm · lower is fitter` : "No data yet") +
+    tile("HRV", hv.length ? fmtN(avg(hv), 0) + " <small>ms</small>" : "—", hv.length ? `7-day: ${fmtN(last7(hv) ?? avg(hv), 0)} ms · higher is better` : "Needs Apple Watch") +
+    tile("Weight (Health)", wt.length ? fmtN(wt[wt.length-1].y, 1) + " <small>kg</small>" : "—", wt.length ? `Logged ${fmtD(wt[wt.length-1].x)}` : "No weigh-ins logged");
+  if (sl.length) lineChart($("#sleepChart"), sl.map(p => ({ ...p, color: "var(--accent)" })), { low: 7, high: 9, unit: "h", aria: "Sleep hours", h: 200, labelEnds: false }); else $("#sleepChart").innerHTML = `<div class="empty">Sleep appears once Apple Health syncs it.</div>`;
+  if (hr.length) lineChart($("#rhrChart"), hr.map(p => ({ ...p, color: "var(--accent)" })), { unit: "bpm", aria: "Resting heart rate", h: 200, labelEnds: false }); else $("#rhrChart").innerHTML = `<div class="empty">Resting heart rate appears once Apple Health syncs it.</div>`;
+}
+
+/* ---- settings ---- */
+const copyBtn = v => `<button class="btn" type="button" data-copy="${esc(v)}">Copy</button>`;
+function wireCopy(root){ root.querySelectorAll("[data-copy]").forEach(b => b.onclick = async () => {
+  try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "Copied"; } catch (e) { b.textContent = "Select & copy"; const c = b.previousElementSibling; if (c) { const r = document.createRange(); r.selectNodeContents(c); const s = getSelection(); s.removeAllRanges(); s.addRange(r); } }
+  setTimeout(() => b.textContent = "Copy", 1600); }); }
+async function renderSettings(){
+  $("#acctInfo").textContent = S.email ? `Signed in as ${S.email}. Data lives in your Supabase project ${CFG.url.replace(/^https:\/\//, "")}.` : "";
+  $("#about").value = S.settings.about || "";
+  $("#akeyState").textContent = S.settings.anthropic_key ? `Key saved (…${S.settings.anthropic_key.slice(-4)})` : "No key saved";
+  const box = $("#syncSetup");
+  if (!S.uid) { box.innerHTML = ""; return; }
+  const key = S.sync.keys[S.sync.keys.length - 1]?.key;
+  if (!key) {
+    box.innerHTML = `<p class="small" style="margin:0 0 10px">Your iPhone sends Health data here through the <b>Health Auto Export</b> app (App Store; its automatic sync is a premium feature). First create a private sync key, then copy the settings it shows into the app.</p><button class="btn primary" id="mkKey">Create sync key</button><div class="small" id="mkMsg"></div>`;
+    $("#mkKey").onclick = createKey; $("#syncHint").textContent = "Not connected"; return;
+  }
+  const raw = await SB.from("health_raw").select("received_at,metric_names,days_written").order("received_at", { ascending: false }).limit(5);
+  const endpoint = `${CFG.url}/rest/v1/rpc/ingest_health`;
+  $("#syncHint").textContent = S.sync.lastUsed ? `Last delivery ${ago(S.sync.lastUsed)}` : "Waiting for first delivery";
+  box.innerHTML = `
+    <div class="eyebrow" style="margin-bottom:8px">Paste these into Health Auto Export</div>
+    <div class="kv">
+      <span class="kk">URL</span><code>${esc(endpoint)}</code>${copyBtn(endpoint)}
+      <span class="kk">Header: apikey</span><code>${esc(CFG.key)}</code>${copyBtn(CFG.key)}
+      <span class="kk">Header: Authorization</span><code>Bearer ${esc(CFG.key)}</code>${copyBtn("Bearer " + CFG.key)}
+      <span class="kk">Header: x-ingest-key</span><code>${esc(key)}</code>${copyBtn(key)}
+    </div>
+    <div class="eyebrow" style="margin:16px 0 4px">Set up on your iPhone (once)</div>
+    <ol class="steps">
+      <li>Install <b>Health Auto Export – JSON+CSV</b> from the App Store and unlock Premium (needed for automations).</li>
+      <li>Open it and allow access to: <b>Step Count, Active Energy, Resting Heart Rate, Heart Rate Variability, Weight, Sleep Analysis</b>.</li>
+      <li>Go to <b>Automations → New automation → REST API</b>. Paste the <b>URL</b> above.</li>
+      <li>Add three <b>Headers</b>: <span class="mono">apikey</span>, <span class="mono">Authorization</span> and <span class="mono">x-ingest-key</span>, each with the value above.</li>
+      <li>Data type <b>Health Metrics</b>; select the six metrics from step 2. Format <b>JSON</b>. Turn on <b>Aggregate data</b> with time grouping <b>Day</b>. Date range <b>last 7 days</b> (re-sending recent days keeps totals correct).</li>
+      <li>Set the sync interval (e.g. every hour), switch the automation on, then use <b>Manual export</b> / test once. A row should appear under “Recent deliveries” below within a minute.</li>
+    </ol>
+    <p class="small muted" style="margin:6px 0 0">iOS decides when background apps run and only lets them read Health while the phone is unlocked, so deliveries typically land a few times a day rather than every minute. Opening Health Auto Export forces a sync.</p>
+    <div class="eyebrow" style="margin:16px 0 4px">Recent deliveries</div>
+    ${raw.data && raw.data.length ? raw.data.map(r => `<div class="lrow"><div class="n">${esc(new Date(r.received_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }))}</div><div class="v">${r.days_written} day${r.days_written === 1 ? "" : "s"}</div><div class="d">${esc((r.metric_names || []).join(", ") || "no metrics in payload")}</div></div>`).join("") : `<div class="empty">Nothing received yet.</div>`}
+    <div class="row" style="margin-top:12px"><button class="btn" id="rotKey">Replace sync key</button><span class="small muted">Do this if the key was ever shared. Update the header in Health Auto Export afterwards.</span></div>`;
+  wireCopy(box);
+  $("#rotKey").onclick = async () => { const b = $("#rotKey"); b.disabled = true; try { await SB.from("ingest_keys").delete().eq("user_id", S.uid); await createKey(); } catch (e) { b.disabled = false; } };
+}
+async function createKey(){
+  const bytes = crypto.getRandomValues(new Uint8Array(24)); const key = "hl_" + Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+  const { error } = await SB.from("ingest_keys").insert({ key, user_id: S.uid });
+  if (error) { toastMsg("#mkMsg", "Couldn't create the key: " + esc(error.message), true); return; }
+  await loadAll(); renderSettings();
+}
+$("#akeySave").onclick = async () => {
+  const v = $("#akey").value.trim(); if (!/^sk-ant-/.test(v)) return toastMsg("#akeyMsg", "That doesn't look like an Anthropic key (it starts with sk-ant-).", true);
+  const { error } = await SB.from("user_settings").upsert({ user_id: S.uid, anthropic_key: v, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) return toastMsg("#akeyMsg", "Couldn't save: " + esc(error.message), true);
+  S.settings.anthropic_key = v; $("#akey").value = ""; toastMsg("#akeyMsg", "Saved. Report reading and questions are now on for every device you sign in on."); renderSettings();
+};
+$("#akeyTest").onclick = async () => {
+  toastMsg("#akeyMsg", "Testing…");
+  try { await claudeCall([{ type: "text", text: "Reply with the single word: ready" }], { maxTokens: 10 }); toastMsg("#akeyMsg", "Claude is reachable with your key."); }
+  catch (e) { toastMsg("#akeyMsg", esc(e.message), true); }
+};
+$("#aboutSave").onclick = async () => {
+  const v = $("#about").value.trim().slice(0, 600);
+  const { error } = await SB.from("user_settings").upsert({ user_id: S.uid, about: v, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) return toastMsg("#aboutMsg", "Couldn't save: " + esc(error.message), true);
+  S.settings.about = v; toastMsg("#aboutMsg", "Saved.");
+};
+$("#signOut").onclick = async () => { await SB?.auth.signOut(); };
+
+/* ---- sign-in gate ---- */
+function showGate(mode){
+  $("#gate").hidden = false; $("#gateCfg").hidden = mode !== "cfg"; $("#gateLogin").hidden = mode !== "login";
+}
+$("#gateCfg").onsubmit = e => {
+  e.preventDefault();
+  const u = $("#cfgUrl").value.trim().replace(/\/+$/, ""), k = $("#cfgKey").value.trim();
+  try { localStorage.setItem("hl-sb-url", u); localStorage.setItem("hl-sb-key", k); } catch (er) {}
+  location.reload();
+};
+$("#gateLogin").onsubmit = async e => {
+  e.preventDefault(); $("#lgBtn").disabled = true; toastMsg("#lgMsg", "Signing in…");
+  const { data, error } = await SB.auth.signInWithPassword({ email: $("#lgEmail").value.trim(), password: $("#lgPass").value });
+  $("#lgBtn").disabled = false;
+  if (error) return toastMsg("#lgMsg", error.message === "Invalid login credentials" ? "Email or password is wrong." : esc(error.message), true);
+  await onSignedIn(data.session);
+};
+$("#lgCreate").onclick = async () => {
+  const email = $("#lgEmail").value.trim(), pw = $("#lgPass").value;
+  if (!email || pw.length < 8) return toastMsg("#lgMsg", "Enter your email and a password of at least 8 characters, then tap Create.", true);
+  toastMsg("#lgMsg", "Creating account…");
+  const { data, error } = await SB.auth.signUp({ email, password: pw });
+  if (error) return toastMsg("#lgMsg", /not allowed|disabled/i.test(error.message) ? "New sign-ups are switched off for this app. Sign in with your existing account." : esc(error.message), true);
+  if (data.session) return onSignedIn(data.session);
+  toastMsg("#lgMsg", "Account created. Supabase sent a confirmation email; confirm it, then sign in here. (To skip this, turn off “Confirm email” in Supabase → Authentication → Providers → Email.)");
+};
+async function onSignedIn(session){
+  S.uid = session.user.id; S.email = session.user.email;
+  $("#gate").hidden = true;
+  await loadAll();
+}
+
+/* ---- boot ---- */
+document.addEventListener("click", e => { const a = e.target.closest('a[href="#settings"]'); if (a) { e.preventDefault(); go("settings"); } });
+$("#refreshBtn").onclick = () => loadAll();
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.uid) loadAll(); });
+try { const h = (location.hash || "").slice(1); const t = h && document.getElementById("v-" + h) ? h : localStorage.getItem("hl-tab"); if (t && document.getElementById("v-" + t)) go(t); } catch (e) {}
+window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (document.getElementById("v-" + h)) go(h); });
+renderAll();
+(async () => {
+  if (!window.supabase || !window.supabase.createClient) { notice("Couldn't load the Supabase library. Check your internet connection and reload."); return; }
+  if (!CFG.url || !CFG.key) { showGate("cfg"); return; }
+  SB = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "hl-auth" } });
+  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { S.uid = null; S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
+  const { data: { session } } = await SB.auth.getSession();
+  if (!session) showGate("login"); else await onSignedIn(session);
+})();
+
+</script>
+</body>
+</html>
