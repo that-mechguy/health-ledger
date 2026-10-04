@@ -90,6 +90,7 @@ section.view{display:flex;flex-direction:column;gap:18px;padding-top:20px}
 .pill-btn{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:5px 12px;font-size:.82rem;font-weight:600;color:var(--ink-2)}
 .pill-btn[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .btn{border:1px solid var(--line);background:var(--surface);border-radius:9px;padding:8px 14px;font-weight:600;font-size:.88rem;display:inline-flex;align-items:center;gap:6px}
+a.btn{text-decoration:none}
 .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .btn.danger{color:var(--bad);border-color:var(--bad)}
 .btn:disabled{opacity:.5;cursor:default}
@@ -1335,6 +1336,9 @@ function renderSyncCard(){
         <div class="small muted">Last delivery ${ago(last)}${days.length ? ` · latest day ${fmtD(days[days.length-1])}` : ""}${!fresh && last ? " · open Health Auto Export on your phone to nudge it" : ""}</div></div><a class="btn" href="#settings">Sync settings</a></div>`;
 }
 /* ---- Today panel ---- */
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const SYNC_SHORTCUT = "Health Ledger Sync";
+const syncBtn = () => IS_IOS ? `<a class="btn primary" href="shortcuts://run-shortcut?name=${encodeURIComponent(SYNC_SHORTCUT)}" title="Runs your “${SYNC_SHORTCUT}” Shortcut, which sends the latest Apple Health data">↻ Sync from iPhone</a>` : "";
 S.todayOff = 0;
 const hourlyCache = {};
 async function loadHourly(d){
@@ -1375,7 +1379,7 @@ function renderToday(){
   const nothing = steps == null && a.hra == null && a.h == null && a.bps == null && a.sl == null;
   el.innerHTML = `
     <div class="card-h"><div><h2>${dayLbl}</h2><div class="small muted">${fmtD(d)}${S.sync.lastUsed ? ` · last sync ${ago(S.sync.lastUsed)}` : ""}</div></div>
-      <div class="row" id="todayPick"><button class="pill-btn" data-o="0" aria-pressed="${S.todayOff === 0}">Today</button><button class="pill-btn" data-o="1" aria-pressed="${S.todayOff === 1}">Yesterday</button></div></div>
+      <div class="row">${syncBtn()}<div class="row" id="todayPick"><button class="pill-btn" data-o="0" aria-pressed="${S.todayOff === 0}">Today</button><button class="pill-btn" data-o="1" aria-pressed="${S.todayOff === 1}">Yesterday</button></div></div></div>
     ${nothing ? `<div class="notice" style="margin-bottom:14px">No ${dayLbl.toLowerCase()} data has arrived yet. Open Health Auto Export on your phone to send the latest, then tap ↻.</div>` : ""}
     <div class="today-hero">
       <div class="today-steps">
@@ -1464,6 +1468,13 @@ async function renderSettings(){
       <li>Set the sync interval (e.g. every hour), switch the automation on, then use <b>Manual export</b> / test once. A row should appear under “Recent deliveries” below within a minute.</li>
     </ol>
     <p class="small muted" style="margin:6px 0 0">iOS decides when background apps run and only lets them read Health while the phone is unlocked, so deliveries typically land a few times a day rather than every minute. Opening Health Auto Export forces a sync.</p>
+    <div class="eyebrow" style="margin:16px 0 4px">One-tap “Sync from iPhone” button (recommended)</div>
+    <ol class="steps">
+      <li>Shortcuts app → <b>+</b> → name it exactly <span class="mono">${SYNC_SHORTCUT}</span>.</li>
+      <li>Add the action <b>Run Automation</b> (from Health Auto Export) and pick your Health Ledger automation. Done.</li>
+      <li>Now the <b>↻ Sync from iPhone</b> button on the Activity tab runs it. Come back to this app and it refreshes by itself.</li>
+      <li>Optional: Shortcuts → <b>Automation</b> → <b>Time of Day</b> (e.g. 9 am, 1 pm, 6 pm, 10 pm) → run <span class="mono">${SYNC_SHORTCUT}</span>. Each runs only if your phone is unlocked at that moment.</li>
+    </ol>
     <div class="eyebrow" style="margin:16px 0 4px">Recent deliveries</div>
     ${raw.data && raw.data.length ? raw.data.map(r => `<div class="lrow"><div class="n">${esc(new Date(r.received_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }))}</div><div class="v">${r.days_written} day${r.days_written === 1 ? "" : "s"}</div><div class="d">${esc((r.metric_names || []).join(", ") || "no metrics in payload")}</div></div>`).join("") : `<div class="empty">Nothing received yet.</div>`}
     <div class="row" style="margin-top:12px"><button class="btn" id="rotKey">Replace sync key</button><span class="small muted">Do this if the key was ever shared. Update the header in Health Auto Export afterwards.</span></div>`;
@@ -1530,7 +1541,7 @@ async function onSignedIn(session){
 /* ---- boot ---- */
 document.addEventListener("click", e => { const a = e.target.closest('a[href="#settings"]'); if (a) { e.preventDefault(); go("settings"); } });
 $("#refreshBtn").onclick = () => loadAll();
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.uid) loadAll(); });
+let backT; document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && S.uid) { loadAll(); clearTimeout(backT); backT = setTimeout(loadAll, 15000); } });
 try { const h = (location.hash || "").slice(1); const t = h && document.getElementById("v-" + h) ? h : localStorage.getItem("hl-tab"); if (t && document.getElementById("v-" + t)) go(t); } catch (e) {}
 window.addEventListener("hashchange", () => { const h = location.hash.slice(1); if (document.getElementById("v-" + h)) go(h); });
 renderAll();
