@@ -264,7 +264,6 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
     <nav class="tabs" role="tablist" id="tabs">
       <button class="tab" role="tab" data-tab="overview" aria-selected="true">Overview</button>
       <button class="tab" role="tab" data-tab="activity" aria-selected="false">Activity</button>
-      <button class="tab" role="tab" data-tab="nutrition" aria-selected="false">Daily nutrition</button>
       <button class="tab" role="tab" data-tab="readiness" aria-selected="false">Readiness</button>
       <button class="tab" role="tab" data-tab="results" aria-selected="false">Latest results</button>
       <button class="tab" role="tab" data-tab="body" aria-selected="false">Body scan</button>
@@ -412,9 +411,6 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
   </section>
 
   <!-- READINESS -->
-  <!-- DAILY NUTRITION (built by nutrition.js) -->
-  <section class="view" id="v-nutrition" hidden></section>
-
   <section class="view" id="v-readiness" hidden>
     <div class="card">
       <div class="card-h">
@@ -483,6 +479,12 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
     <div class="card">
       <div class="card-h"><h2>Apple Health sync</h2><span class="hint" id="syncHint"></span></div>
       <div id="syncSetup"><div class="empty">Loading…</div></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Primary device</h2><span class="hint" id="pdState"></span></div>
+      <p class="small" style="margin:0 0 10px">Pick the device you wear all day (e.g. your Fitbit). On any day it has data, only its steps, sleep and heart readings are used; other devices fill in only days it has nothing. Choose “Combine all devices” to merge them instead.</p>
+      <div class="row"><select id="pdSel" style="flex:1 1 240px"><option value="">Combine all devices</option></select><button class="btn primary" id="pdSave" type="button">Save &amp; recalculate</button></div>
+      <div class="small" id="pdMsg" style="margin-top:6px"></div>
     </div>
     <div class="card">
       <div class="card-h"><h2>Data check: steps today</h2><button class="btn" id="dcRun" type="button">Check now</button></div>
@@ -973,7 +975,7 @@ function go(tab, anchor){
   S.tab = tab;
   document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === tab)));
   document.querySelectorAll("section.view").forEach(s => s.hidden = s.id !== "v-" + tab);
-  if (tab === "history") renderHistory(); if (tab === "body") renderBody(); if (tab === "activity") renderActivity(); if (tab === "readiness") renderReadiness(); if (tab === "settings") renderSettings(); if (tab === "nutrition") window.NUT?.render();
+  if (tab === "history") renderHistory(); if (tab === "body") renderBody(); if (tab === "activity") renderActivity(); if (tab === "readiness") renderReadiness(); if (tab === "settings") renderSettings();
   try { localStorage.setItem("hl-tab", tab); } catch(e) {}
   if (anchor) { const el = document.getElementById("cat-" + anchor); if (el) setTimeout(() => el.scrollIntoView({behavior:"smooth", block:"start"}), 30); }
   else window.scrollTo({top:0});
@@ -1053,12 +1055,15 @@ $("#hkFile").onchange = async e => {
     const SUM = new Set(["StepCount", "ActiveEnergyBurned", "Sleep"]), LAST = new Set(["BodyMass", "BloodPressureSystolic", "BloodPressureDiastolic"]);
     const minuteHours = {}; // type|day -> [24] merged per-hour totals
     for (const [t, byD] of Object.entries(MIN)) for (const [d, bySrc] of Object.entries(byD)) {
-      const arrs = Object.values(bySrc); const hrs = new Array(24).fill(0); let tot = 0;
+      const prim = S.settings.primary_source; const usePrim = prim && bySrc[prim];
+      const arrs = usePrim ? [bySrc[prim]] : Object.values(bySrc); const hrs = new Array(24).fill(0); let tot = 0;
       for (let m = 0; m < 1440; m++) { let mx = 0; for (const a of arrs) if (a[m] > mx) mx = a[m]; hrs[m / 60 | 0] += mx; tot += mx; }
       const o = days[d] ||= { src: "apple-health" }; if (t === "StepCount") o.s = Math.round(tot); else o.k = Math.round(tot);
-      minuteHours[t + "|" + d] = hrs; }
+      minuteHours[t + "|" + d] = hrs; if (usePrim) minuteHours[t + "|" + d].src = "export:" + prim; }
     const byDay = {}; // type|day -> list of per-source aggregates
-    for (const [k, o] of Object.entries(agg)) { const [t, d, , hr] = k.split("|"); o.hr = hr; (byDay[t + "|" + d] ||= []).push(o); }
+    for (const [k, o] of Object.entries(agg)) { const [t, d, src, hr] = k.split("|"); o.hr = hr; o.src = src; (byDay[t + "|" + d] ||= []).push(o); }
+    const primSrc = S.settings.primary_source;
+    if (primSrc) for (const id in byDay) { const only = byDay[id].filter(o => o.src === primSrc); if (only.length) byDay[id] = only; }
     for (const [id, list] of Object.entries(byDay)) {
       const [t, d] = id.split("|"); const o = days[d] ||= { src: "apple-health" };
       if (SUM.has(t)) { let v;
@@ -1075,12 +1080,13 @@ $("#hkFile").onchange = async e => {
     const n = Object.keys(days).length; if (!n) throw new Error(`No Health records found on or after ${fmtD(since)}.`);
     toastMsg("#hkMsg", `Found ${n} days. Saving…`);
     for (const [d, o] of Object.entries(days)) { const cur = S.activity[d]; if (!cur) continue;
+      if (S.settings.primary_source) continue;
       if (cur.s != null && o.s != null && cur.s > o.s) delete o.s; if (cur.k != null && o.k != null && cur.k > o.k) delete o.k; }
     await mergeActivity(days);
     // keep hourly step/energy records for the last 60 days, so later syncs add to the full day instead of replacing it
     const cutoff = iso(new Date(Date.now() - 59*864e5)); const rows = []; const touched = new Set();
     for (const [k, hrs] of Object.entries(minuteHours)) { const [t, d] = k.split("|"); if (d < cutoff) continue;
-      hrs.forEach((v, h) => { if (v > 0) rows.push({ user_id: S.uid, kind: t === "StepCount" ? "steps" : "kcal", src: "export", ts: `${d} ${String(h).padStart(2, "0")}:00:01 export`, day: d, v: Math.round(v * 10) / 10 }); });
+      hrs.forEach((v, h) => { if (v > 0) rows.push({ user_id: S.uid, kind: t === "StepCount" ? "steps" : "kcal", src: hrs.src || "export", ts: `${d} ${String(h).padStart(2, "0")}:00:01 export`, day: d, v: Math.round(v * 10) / 10 }); });
       touched.add(d); }
     for (let i = 0; i < rows.length; i += 500) { const { error } = await SB.from("health_samples").upsert(rows.slice(i, i + 500), { onConflict: "user_id,kind,src,ts" }); if (error) throw error; }
     if (touched.size) { const { error } = await SB.rpc("recalc_activity", { days: [...touched] }); if (error) throw error; }
@@ -1213,7 +1219,6 @@ async function loadAll(){
     S.loadedR = S.loadedA = true;
     notice("");
     renderAll();
-    window.NUT?.load();
   } catch (e) {
     notice("Couldn't load your data: " + esc(e.message || e.code || e) + ". Check your connection and tap refresh.");
   } finally { loading = false; btn?.classList.remove("spin"); }
@@ -1532,6 +1537,7 @@ function wireCopy(root){ root.querySelectorAll("[data-copy]").forEach(b => b.onc
 async function renderSettings(){
   $("#acctInfo").textContent = S.email ? `Signed in as ${S.email}. Data lives in your Supabase project ${CFG.url.replace(/^https:\/\//, "")}.` : "";
   $("#about").value = S.settings.about || "";
+  loadSources();
   $("#akeyState").textContent = S.settings.anthropic_key ? `Key saved (…${S.settings.anthropic_key.slice(-4)})` : "No key saved";
   const box = $("#syncSetup");
   if (!S.uid) { box.innerHTML = ""; return; }
@@ -1574,6 +1580,27 @@ async function renderSettings(){
   wireCopy(box);
   $("#rotKey").onclick = async () => { const b = $("#rotKey"); b.disabled = true; try { await SB.from("ingest_keys").delete().eq("user_id", S.uid); await createKey(); } catch (e) { b.disabled = false; } };
 }
+async function loadSources(){
+  const sel = $("#pdSel"); const cur = S.settings.primary_source || "";
+  let list = [];
+  try { const { data, error } = await SB.rpc("recent_sources"); if (error) throw error; list = data || []; } catch (e) {}
+  const names = list.map(x => x.src); if (cur && !names.includes(cur)) names.unshift(cur);
+  sel.innerHTML = `<option value="">Combine all devices</option>` + names.map(n => { const x = list.find(l => l.src === n);
+    return `<option value="${esc(n)}" ${n === cur ? "selected" : ""}>${esc(n)}${x ? ` · ${x.records} records, last ${fmtShort(x.last_day)}` : ""}</option>`; }).join("");
+  $("#pdState").textContent = cur ? `Using ${cur}` : "Combining devices";
+}
+$("#pdSave").onclick = async () => {
+  const v = $("#pdSel").value; const b = $("#pdSave"); b.disabled = true; toastMsg("#pdMsg", "Saving and recalculating the last 60 days…");
+  try {
+    const { error } = await SB.from("user_settings").upsert({ user_id: S.uid, primary_source: v || null, updated_at: new Date().toISOString() }, { onConflict: "user_id" }); if (error) throw error;
+    S.settings.primary_source = v || null;
+    const days = []; for (let i = 0; i < 60; i++) days.push(dayShift(todayISO(), -i));
+    const r2 = await SB.rpc("recalc_activity", { days }); if (r2.error) throw r2.error;
+    await loadAll();
+    toastMsg("#pdMsg", v ? `Done. ${v} is now the main source. To apply it to older history too, re-upload your Health export in Activity → Fill in older history.` : "Done. Devices are combined again.");
+  } catch (e) { toastMsg("#pdMsg", "Couldn't save: " + esc(e.message || e.code), true); }
+  finally { b.disabled = false; }
+};
 async function dataCheck(){
   const out = $("#dcOut"); out.innerHTML = `<div class="empty small">Checking…</div>`;
   const d = todayISO();
@@ -1835,13 +1862,11 @@ renderAll();
   if (!window.supabase || !window.supabase.createClient) { notice("Couldn't load the Supabase library. Check your internet connection and reload."); return; }
   if (!CFG.url || !CFG.key) { showGate("cfg"); return; }
   SB = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "hl-auth" } });
-  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { window.NUT?.reset(); S.uid = null; S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
+  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { S.uid = null; S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
   const { data: { session } } = await SB.auth.getSession();
   if (!session) showGate("login"); else await onSignedIn(session);
 })();
 
 </script>
-<script src="foods.js"></script>
-<script src="nutrition.js"></script>
 </body>
 </html>
