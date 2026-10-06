@@ -252,6 +252,21 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
 .zleg{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:.74rem;color:var(--ink-2);margin-top:8px}
 .zleg span{display:inline-flex;align-items:center;gap:4px}
 .sync-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
+.sheet.mx{width:min(760px,100%);gap:16px}
+.sheet.mx h3{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 6px;font-weight:600}
+.sheet.mx p{margin:0;line-height:1.55}
+.mx-box{background:var(--surface-2);border-radius:12px;padding:12px 14px}
+.mx-bands{display:flex;flex-direction:column;gap:6px}
+.mx-band{border-left:4px solid var(--info);background:var(--surface-2);border-radius:8px;padding:8px 12px}
+.mx-band.ok{border-color:var(--ok)} .mx-band.border{border-color:var(--warn)} .mx-band.out{border-color:var(--bad)}
+.mx-band.here.ok{background:var(--ok-bg)} .mx-band.here.border{background:var(--warn-bg)} .mx-band.here.out{background:var(--bad-bg)} .mx-band.here.info{background:var(--info-bg)}
+.mx-band.here{outline:2px solid currentColor;outline-offset:-2px}
+.mx-band.ok.here{color:var(--ok)} .mx-band.border.here{color:var(--warn)} .mx-band.out.here{color:var(--bad)}
+.mx-bl{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--ink)} .mx-bm{font-size:.86rem;color:var(--ink-2);margin-top:2px}
+.mx-you{font-size:.82rem;font-weight:600;margin-top:4px}
+.mx-t{width:100%;border-collapse:collapse;font-size:.88rem} .mx-t th{text-align:left;font-size:.74rem;color:var(--muted);font-weight:600;padding:4px 8px 6px 0} .mx-t td{padding:7px 8px 7px 0;border-top:1px solid var(--line);vertical-align:top}
+.mrow .mn::after{content:" ⓘ";color:var(--muted);font-size:.8em}
+.lrow.click{cursor:pointer} .lrow.click:hover .n{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -297,7 +312,7 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
       <div class="sys" id="sysScores"><div class="empty">No blood tests yet. Upload one from the Reports tab.</div></div>
     </div>
     <div class="grid g2">
-      <div class="card"><div class="card-h"><h2>Needs attention</h2><span class="hint">Out of range in your latest test</span></div><div id="attn"><div class="empty">Nothing flagged yet.</div></div></div>
+      <div class="card"><div class="card-h"><h2>Needs attention</h2><span class="hint">Out of range in your latest test · tap one to learn what it means</span></div><div id="attn"><div class="empty">Nothing flagged yet.</div></div></div>
       <div class="card"><div class="card-h"><h2>Moving the right way</h2><span class="hint">Better than the previous test</span></div><div id="better"><div class="empty">Needs two tests to compare.</div></div></div>
     </div>
     <div class="grid g2">
@@ -322,6 +337,7 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
       <button class="pill-btn" id="resFlagged" aria-pressed="false">Only out of range</button>
       <button class="pill-btn" id="resAll" aria-pressed="false">Include ratios & sub-counts</button>
     </div>
+    <p class="small muted" style="margin:0 0 10px">Tap any test to see what it measures, what each range means and how it affects your body.</p>
     <div id="resBody" class="grid g2"></div>
   </section>
 
@@ -825,10 +841,11 @@ function renderOverview(){
   const flagged = fresh.filter(e => ["out","border"].includes(statusOf(e.p))).sort((a,b) => (devOf(b.p)||0) - (devOf(a.p)||0));
   $("#attn").innerHTML = flagged.length ? flagged.slice(0,10).map(e => {
     const p = e.p, st = statusOf(p);
-    return `<div class="lrow"><div class="n">${esc(p.name)} ${chip(st)}</div><div class="v">${fmtN(numVal(p.value) ?? p.value)} <span class="muted small">${esc(p.unit)}</span></div>
+    return `<div class="lrow click" data-key="${esc(p.key)}" role="button" tabindex="0"><div class="n">${esc(p.name)} ${chip(st)}</div><div class="v">${fmtN(numVal(p.value) ?? p.value)} <span class="muted small">${esc(p.unit)}</span></div>
       <div class="d">Range ${esc(p.ref || "")} · ${deltaHTML(p.key)}</div></div>`;
   }).join("") + (flagged.length > 10 ? `<div class="small muted" style="padding-top:8px">+${flagged.length-10} more in Latest results.</div>` : "") : `<div class="empty">Nothing flagged in your latest test.</div>`;
 
+  $("#attn").querySelectorAll(".lrow.click").forEach(r => { r.onclick = () => openMarker(r.dataset.key); r.onkeydown = e => { if (e.key === "Enter") openMarker(r.dataset.key); }; });
   const better = Object.keys(D.latest).map(trendOf).filter(t => t && t.dir === "better" && isScored(t.cur.p) && t.cur.date === D.lastBlood)
     .sort((a,b) => ((devOf(a.prev.p)||0)-(devOf(a.cur.p)||0)) < ((devOf(b.prev.p)||0)-(devOf(b.cur.p)||0)) ? 1 : -1);
   $("#better").innerHTML = better.length ? better.slice(0,8).map(t => `<div class="lrow"><div class="n">${esc(t.cur.p.name)} ${chip(statusOf(t.cur.p))}</div>
@@ -866,7 +883,7 @@ function renderResults(){
           <div><div class="mval">${fmtN(numVal(p.value) ?? p.value)} <small>${esc(p.unit)}</small></div><div style="text-align:right">${deltaHTML(p.key)}</div></div></div>`; }).join("") + `</div></div>`);
   }
   $("#resBody").innerHTML = out.length ? out.join("") : `<div class="empty">${S.reports.length ? "No markers match." : "No blood tests yet."}</div>`;
-  $("#resBody").querySelectorAll(".mrow").forEach(r => { const f = () => { S.histCat = r.dataset.cat; S.histKey = r.dataset.key; go("history"); }; r.onclick = f; r.onkeydown = e => { if (e.key === "Enter") f(); }; });
+  $("#resBody").querySelectorAll(".mrow").forEach(r => { const f = () => openMarker(r.dataset.key); r.onclick = f; r.onkeydown = e => { if (e.key === "Enter") f(); }; });
 }
 
 /* ---------- render: history ---------- */
@@ -885,7 +902,8 @@ function renderHistory(){
   const s = D.series[S.histKey], lp = s[s.length-1].p;
   $("#histTitle").textContent = lp.name;
   $("#histSub").textContent = `${s.length} test${s.length > 1 ? "s" : ""} · ${fmtShort(s[0].date)} to ${fmtShort(s[s.length-1].date)} · range ${lp.ref || "—"}${lp.unit ? " " + lp.unit : ""}`;
-  $("#histChip").innerHTML = chip(statusOf(lp), `Latest: ${STLABEL[statusOf(lp)]}`);
+  $("#histChip").innerHTML = chip(statusOf(lp), `Latest: ${STLABEL[statusOf(lp)]}`) + ` <button class="pill-btn" id="histAbout" type="button">What is this?</button>`;
+  $("#histAbout").onclick = () => openMarker(S.histKey);
   const pts = s.map(e => ({x:e.date, y:numVal(e.p.value), st:statusOf(e.p)})).filter(p => p.y != null);
   lineChart($("#histChart"), pts, {low: lp.low, high: lp.high, unit: lp.unit, aria: `${lp.name} over time`});
   const t = trendOf(S.histKey); const first = pts[0], last = pts[pts.length-1];
@@ -1206,7 +1224,8 @@ async function loadAll(){
       SB.from("reports").select("id,type,date,doc,file_path").order("date", { ascending: false }),
       fetchAllHealth(),
       SB.from("user_settings").select("*").maybeSingle(),
-      SB.from("ingest_keys").select("key,created_at,last_used").order("created_at")
+      SB.from("ingest_keys").select("key,created_at,last_used").order("created_at"),
+      loadMarkerInfo().catch(() => {})
     ]);
     if (r.error) throw r.error;
     S.reports = r.data.map(x => ({ ...x.doc, id: x.id, type: x.type, date: x.date, filePath: x.file_path }));
@@ -1418,6 +1437,7 @@ async function saveReview(){
     $("#sheetRoot").innerHTML = ""; pending = null;
     toastMsg("#upMsg", `Saved ${kind === "body" ? "body scan" : "blood test"} from ${fmtD(date)} with ${params.length} values.`); $("#upProg").hidden = true;
     await loadAll();
+    if (kind === "blood") explainNewMarkers();
   } catch (e) {
     toastMsg("#rvMsg", esc(e.message || e.code || "Couldn't save."), true); btn.disabled = false;
   }
@@ -1850,6 +1870,422 @@ $("#rdDate").onchange = e => { const v = e.target.value; if (!v) return; S.rdOff
 document.querySelectorAll("#rdRange button").forEach(x => x.onclick = () => { S.rdRange = +x.dataset.r; renderReadiness(); });
 $("#rdNext").onclick = () => { S.rdOff = Math.max(0, S.rdOff - 1); renderReadiness(); };
 $("#rdToday").onclick = () => { S.rdOff = 0; renderReadiness(); };
+
+
+/* ================= Marker explainer: knowledge base ================= */
+// General educational content (not personal data). Bands use the units most Indian labs report.
+const MSRC = {
+  atp3: { t: "NHLBI · ATP III cholesterol classification", u: "https://www.nhlbi.nih.gov/files/docs/guidelines/atglance.pdf" },
+  ada: { t: "American Diabetes Association · Diagnosis", u: "https://diabetes.org/about-diabetes/diagnosis" },
+  odsD: { t: "NIH ODS · Vitamin D fact sheet", u: "https://ods.od.nih.gov/factsheets/VitaminD-HealthProfessional/" },
+  odsB12: { t: "NIH ODS · Vitamin B12 fact sheet", u: "https://ods.od.nih.gov/factsheets/VitaminB12-HealthProfessional/" },
+  odsFe: { t: "NIH ODS · Iron fact sheet", u: "https://ods.od.nih.gov/factsheets/Iron-HealthProfessional/" },
+  odsFol: { t: "NIH ODS · Folate fact sheet", u: "https://ods.od.nih.gov/factsheets/Folate-HealthProfessional/" },
+  odsMg: { t: "NIH ODS · Magnesium fact sheet", u: "https://ods.od.nih.gov/factsheets/Magnesium-HealthProfessional/" },
+  crp: { t: "CDC/AHA · Markers of inflammation and CVD", u: "https://www.ahajournals.org/doi/10.1161/01.cir.0000148980.87579.5e" },
+  kdigo: { t: "KDIGO 2024 · CKD guideline", u: "https://kdigo.org/wp-content/uploads/2024/03/KDIGO-2024-CKD-Guideline.pdf" },
+  mlp: { t: "MedlinePlus · Lab tests (NIH)", u: "https://medlineplus.gov/lab-tests/" }
+};
+const b = (l, min, max, tone, m) => ({ l, min, max, tone, m });
+const MARKER_INFO = {
+  /* ---------- Heart & lipids ---------- */
+  tc: { what: "All the cholesterol carried in your blood: the 'bad' (LDL, VLDL) and the 'good' (HDL) together. Cholesterol builds cell walls and hormones, but too much in the blood deposits in artery walls.",
+    bands: [b("Desirable", null, 200, "ok", "Lower long-term risk of artery plaque."), b("Borderline high", 200, 240, "border", "Worth improving with diet, weight and activity."), b("High", 240, null, "out", "Clearly raises heart-attack and stroke risk over years.")],
+    high: "Over years, cholesterol deposits narrow arteries (atherosclerosis), raising the risk of heart attack and stroke. It causes no symptoms on its own.", low: "Rarely a problem. Very low values can occur with an overactive thyroid, malnutrition or liver disease.",
+    affects: "Saturated and trans fats, refined carbs, excess weight, inactivity, genetics, an underactive thyroid.", src: ["atp3", "mlp"] },
+  tg: { what: "Triglycerides are the main form of fat in the blood: energy your body stores from extra calories, especially sugar, refined carbs and alcohol.",
+    bands: [b("Normal", null, 150, "ok", "Healthy."), b("Borderline high", 150, 200, "border", "Often the first sign of insulin resistance."), b("High", 200, 500, "out", "Adds to heart risk; usually travels with fatty liver and low HDL."), b("Very high", 500, null, "out", "Risk of pancreatitis; needs medical attention.")],
+    high: "Raises heart and artery risk, often signals insulin resistance and fatty liver. Very high levels (500+) can inflame the pancreas.", low: "Generally not a concern.",
+    affects: "Sugar and refined carbs, alcohol, excess calories, belly fat, inactivity. Values rise sharply after a meal: test fasting.", src: ["atp3", "mlp"] },
+  hdl: { what: "HDL is the 'good' cholesterol: it carries excess cholesterol away from arteries back to the liver for disposal.",
+    bands: [b("Low", null, 40, "out", "Less protection; a heart-risk factor in men."), b("Acceptable", 40, 60, "ok", "Normal."), b("High (protective)", 60, null, "ok", "Linked with lower heart risk.")],
+    high: "Generally protective. Extremely high values (above ~100) are not necessarily better.", low: "Below 40 is an independent risk factor for heart disease and often accompanies high triglycerides and insulin resistance.",
+    affects: "Raised by exercise, weight loss, quitting smoking and healthy fats; lowered by inactivity, smoking, refined carbs and excess weight.", src: ["atp3", "mlp"] },
+  ldl: { what: "LDL is the main 'bad' cholesterol, the type that builds plaque inside artery walls. Most labs calculate it from total cholesterol, HDL and triglycerides.",
+    bands: [b("Optimal", null, 100, "ok", "Best for long-term heart health."), b("Near optimal", 100, 130, "border", "Slightly above ideal."), b("Borderline high", 130, 160, "border", "Lifestyle changes recommended."), b("High", 160, 190, "out", "Raises heart risk."), b("Very high", 190, null, "out", "May indicate inherited high cholesterol; see a doctor.")],
+    high: "The strongest driver of artery plaque; the longer it stays high, the higher the lifetime risk of heart attack and stroke.", low: "Low LDL is usually fine.",
+    affects: "Saturated fat (ghee, butter, fried and bakery foods), trans fats, genetics, weight, thyroid. Calculated LDL is less accurate when triglycerides are high.", src: ["atp3", "mlp"] },
+  vldl: { what: "VLDL carries triglycerides made by the liver. It's usually estimated as triglycerides ÷ 5, so it moves with triglycerides.",
+    bands: [b("Normal", null, 30, "ok", "Healthy."), b("High", 30, null, "out", "Reflects high triglycerides.")],
+    high: "Contributes to plaque; mostly a mirror of high triglycerides.", low: "Not a concern.",
+    affects: "Same as triglycerides: sugar, refined carbs, alcohol, excess weight.", src: ["mlp"] },
+  nonhdl: { what: "Total cholesterol minus HDL: every cholesterol particle that can cause plaque. Many doctors consider it a better risk marker than LDL alone.",
+    bands: [b("Desirable", null, 130, "ok", "Low risk."), b("Above desirable", 130, 160, "border", "Room to improve."), b("Borderline high", 160, 190, "border", "Lifestyle changes advised."), b("High", 190, null, "out", "Raises heart risk.")],
+    high: "Captures LDL plus triglyceride-rich particles; high values raise artery risk.", low: "Not a concern.",
+    affects: "Diet, weight, triglycerides, genetics.", src: ["atp3"] },
+  tc_hdl: { what: "Total cholesterol divided by HDL, a quick summary of the balance between harmful and protective cholesterol.",
+    bands: [b("Ideal", null, 3.5, "ok", "Very favourable balance."), b("Acceptable", 3.5, 5, "border", "Average risk."), b("High", 5, null, "out", "Unfavourable balance; higher heart risk.")],
+    high: "Means too little HDL relative to total cholesterol.", low: "Favourable.", affects: "Raising HDL and lowering LDL/triglycerides both improve it.", src: ["mlp"] },
+  ldl_hdl: { what: "LDL divided by HDL: bad vs good cholesterol.", bands: [b("Desirable", null, 3, "ok", "Low risk."), b("High", 3, null, "out", "Higher heart risk.")],
+    high: "Unfavourable cholesterol balance.", low: "Favourable.", affects: "Same as LDL and HDL.", src: ["mlp"] },
+  hdl_ldl: { what: "HDL divided by LDL, the inverse of the LDL/HDL ratio; higher is better.", bands: [b("Low", null, 0.3, "out", "Unfavourable."), b("Borderline", 0.3, 0.4, "border", "Room to improve."), b("Optimal", 0.4, null, "ok", "Favourable.")],
+    high: "Favourable.", low: "Too little HDL for the LDL present.", affects: "Same as LDL and HDL.", src: ["mlp"] },
+  apob: { what: "Apolipoprotein B counts the actual number of plaque-forming particles. It's often a more precise heart-risk marker than LDL, especially when triglycerides are high.",
+    bands: [b("Desirable", null, 90, "ok", "Lower risk."), b("Borderline", 90, 130, "border", "Moderate risk."), b("High", 130, null, "out", "Higher risk.")],
+    high: "More particles to lodge in artery walls.", low: "Favourable.", affects: "Diet, weight, insulin resistance, genetics.", src: ["mlp"] },
+  lpa: { what: "Lipoprotein(a) is a mostly inherited cholesterol particle; one test in a lifetime is usually enough.",
+    bands: [b("Normal", null, 30, "ok", "Typical (mg/dL)."), b("Elevated", 30, 50, "border", "Mildly raised risk."), b("High", 50, null, "out", "Inherited extra heart risk; manage other risk factors tightly.")],
+    high: "Adds heart and stroke risk independent of LDL.", low: "Favourable.", affects: "Mainly genetics; barely changes with lifestyle.", src: ["mlp"] },
+
+  /* ---------- Liver & pancreas ---------- */
+  alt: { what: "ALT (SGPT) is an enzyme found mostly inside liver cells. When liver cells are irritated or inflamed, ALT leaks into the blood, so it's the most specific routine liver-stress marker.",
+    bands: [b("Normal", null, 50, "ok", "Typical lab limit; liver guidelines suggest ~33 as the healthy upper limit for men."), b("Mildly raised", 50, 150, "border", "Most often fatty liver, alcohol, medicines or recent hard exercise."), b("Moderately raised", 150, 250, "out", "Needs medical review."), b("Markedly raised", 250, null, "out", "Significant liver injury; see a doctor promptly.")],
+    high: "Signals liver-cell stress. With low AST/ALT ratio, belly fat and high triglycerides, the commonest cause is fatty liver (MASLD), which can progress to inflammation and scarring over years if not addressed.", low: "Not a concern.",
+    affects: "Liver fat, alcohol, medicines and supplements (some herbal products, high-dose niacin, certain painkillers), viral hepatitis, very hard workouts in the 48–72 h before the test.", src: ["mlp"] },
+  ast: { what: "AST (SGOT) is an enzyme found in the liver but also in muscle and heart, so it's less liver-specific than ALT.",
+    bands: [b("Normal", null, 50, "ok", "Typical lab limit."), b("Raised", 50, 150, "border", "Liver stress or recent muscle strain."), b("High", 150, null, "out", "Needs medical review.")],
+    high: "Can reflect liver stress, alcohol, or muscle damage from intense exercise.", low: "Not a concern.",
+    affects: "Liver fat, alcohol, heavy workouts, muscle injury, some medicines.", src: ["mlp"] },
+  ggt: { what: "GGT is a liver and bile-duct enzyme. It's sensitive to alcohol, fatty liver and some medicines.",
+    bands: [b("Normal", null, 55, "ok", "Typical lab limit for men."), b("Mildly raised", 55, 110, "border", "Commonly fatty liver or alcohol."), b("High", 110, null, "out", "Needs medical review.")],
+    high: "Linked to liver fat, alcohol, bile-flow problems; also associated with higher metabolic and heart risk.", low: "Not a concern.",
+    affects: "Alcohol (even moderate), liver fat, certain medicines (e.g. anti-seizure drugs), bile duct issues.", src: ["mlp"] },
+  alp: { what: "Alkaline phosphatase comes from the liver/bile ducts and from bone.",
+    bands: [b("Low", null, 40, "border", "Occasionally zinc or magnesium deficiency."), b("Normal", 40, 130, "ok", "Healthy."), b("High", 130, null, "out", "Bile-flow problems or bone turnover.")],
+    high: "Can point to blocked bile flow or increased bone activity (growth, healing fractures, vitamin D deficiency).", low: "Usually not significant; sometimes low zinc or magnesium.",
+    affects: "Bone health, vitamin D status, bile ducts, pregnancy, growth.", src: ["mlp"] },
+  bili_t: { what: "Bilirubin is the yellow pigment formed when old red blood cells are broken down; the liver processes and clears it into bile.",
+    bands: [b("Normal", null, 1.2, "ok", "Healthy."), b("Mildly raised", 1.2, 2.5, "border", "Often harmless Gilbert's syndrome, fasting or dehydration."), b("High", 2.5, null, "out", "May cause yellow eyes/skin; needs review.")],
+    high: "Can come from faster red-cell breakdown, a slow liver, or blocked bile. Mild isolated rises in otherwise healthy people are often Gilbert's syndrome, which is harmless.", low: "Not a concern.",
+    affects: "Fasting, dehydration, Gilbert's syndrome, liver or bile-duct disease, red-cell breakdown.", src: ["mlp"] },
+  bili_d: { what: "Direct (conjugated) bilirubin is the part the liver has already processed.", bands: [b("Normal", null, 0.2, "ok", "Healthy."), b("Raised", 0.2, null, "out", "Points to liver or bile-flow problems.")],
+    high: "Suggests the liver can't pass bilirubin into bile, or bile ducts are blocked.", low: "Not a concern.", affects: "Liver and bile-duct health.", src: ["mlp"] },
+  bili_i: { what: "Indirect (unconjugated) bilirubin is the part not yet processed by the liver.", bands: [b("Normal", null, 0.8, "ok", "Healthy."), b("Raised", 0.8, null, "border", "Often Gilbert's syndrome or red-cell breakdown.")],
+    high: "Usually Gilbert's syndrome (harmless) or faster red-cell breakdown.", low: "Not a concern.", affects: "Fasting, Gilbert's syndrome, haemolysis.", src: ["mlp"] },
+  protein: { what: "Total protein = albumin + globulins: a broad marker of nutrition, liver and immune function.",
+    bands: [b("Low", null, 6.6, "border", "Possible poor nutrition, liver or kidney loss."), b("Normal", 6.6, 8.3, "ok", "Healthy."), b("High", 8.3, null, "border", "Dehydration or chronic inflammation.")],
+    high: "Often dehydration; persistently high values can reflect chronic inflammation.", low: "Poor intake, liver disease or protein loss through kidneys/gut.", affects: "Hydration, diet, liver, kidneys, inflammation.", src: ["mlp"] },
+  albumin: { what: "Albumin is the main protein made by the liver. It keeps fluid inside blood vessels and carries hormones and medicines.",
+    bands: [b("Low", null, 3.5, "out", "Liver, kidney or nutrition problem."), b("Normal", 3.5, 5.2, "ok", "Liver's making capacity is fine."), b("High", 5.2, null, "border", "Usually dehydration.")],
+    high: "Mostly dehydration.", low: "Can cause swelling; seen with advanced liver disease, kidney protein loss or malnutrition.", affects: "Liver function, hydration, protein intake.", src: ["mlp"] },
+  globulin: { what: "Globulins are proteins including antibodies.", bands: [b("Low", null, 2.0, "border", "Possible immune deficiency."), b("Normal", 2.0, 3.5, "ok", "Healthy."), b("High", 3.5, null, "border", "Chronic inflammation or infection.")],
+    high: "Ongoing inflammation, infection or, rarely, blood disorders.", low: "Weakened antibody production.", affects: "Immune activity, liver.", src: ["mlp"] },
+  ag: { what: "Albumin ÷ globulin ratio.", bands: [b("Low", null, 1.2, "border", "Globulins relatively high or albumin low."), b("Normal", 1.2, 2.0, "ok", "Balanced."), b("High", 2.0, null, "info", "Usually not significant.")],
+    high: "Rarely significant.", low: "Can reflect inflammation or reduced liver protein-making.", affects: "Liver and immune activity.", src: ["mlp"] },
+  ast_alt: { what: "AST ÷ ALT (De Ritis ratio). It hints at the cause of raised liver enzymes.",
+    bands: [b("Below 1", null, 1, "border", "Typical of fatty liver (MASLD) or viral hepatitis when enzymes are raised."), b("1–2", 1, 2, "ok", "Neutral."), b("Above 2", 2, null, "out", "Suggests alcohol-related liver injury when enzymes are raised.")],
+    high: "With high enzymes, an AST:ALT above 2 points towards alcohol.", low: "With high ALT, a ratio below 1 is the classic fatty-liver pattern.", affects: "Cause of liver stress.", src: ["mlp"] },
+  amylase: { what: "Amylase is a starch-digesting enzyme from the pancreas and salivary glands.",
+    bands: [b("Normal", null, 100, "ok", "Healthy."), b("Mildly raised", 100, 300, "border", "Often harmless (salivary source, kidney clearance); check lipase."), b("High", 300, null, "out", "Possible pancreatitis if with abdominal pain.")],
+    high: "Pancreatitis (usually with pain and high lipase), salivary gland issues, or slower kidney clearance.", low: "Rarely significant.", affects: "Pancreas, salivary glands, kidneys.", src: ["mlp"] },
+  lipase: { what: "Lipase is a fat-digesting enzyme made by the pancreas; more specific to the pancreas than amylase.",
+    bands: [b("Normal", null, 67, "ok", "Healthy."), b("Raised", 67, 200, "border", "Needs context."), b("High", 200, null, "out", "Consider pancreatitis.")],
+    high: "Pancreatitis or pancreatic irritation.", low: "Not usually significant.", affects: "Pancreas health, alcohol, gallstones, very high triglycerides.", src: ["mlp"] },
+  nafld: { what: "NAFLD Fibrosis Score estimates the chance of liver scarring from age, BMI, blood sugar, liver enzymes, platelets and albumin.",
+    bands: [b("Low likelihood", null, -1.455, "ok", "Advanced scarring unlikely."), b("Indeterminate", -1.455, 0.676, "border", "Needs imaging (e.g. FibroScan)."), b("High likelihood", 0.676, null, "out", "Specialist assessment advised.")],
+    high: "Suggests advanced fibrosis may be present.", low: "Reassuring: scarring unlikely at present.", affects: "Weight, blood sugar, liver health, age.", src: ["mlp"] },
+
+  /* ---------- Kidney & electrolytes ---------- */
+  creat: { what: "Creatinine is a waste product from muscle, cleared by the kidneys. Higher levels can mean the kidneys are filtering less.",
+    bands: [b("Low", null, 0.6, "info", "Low muscle mass; usually not a problem."), b("Normal", 0.6, 1.2, "ok", "Healthy kidney clearance."), b("High", 1.2, null, "out", "Reduced kidney filtering, dehydration or high muscle mass/creatine.")],
+    high: "May indicate reduced kidney function; also raised by dehydration, high meat intake, creatine supplements and heavy training.", low: "Usually low muscle mass.", affects: "Muscle mass, hydration, creatine supplements, kidney function.", src: ["kdigo", "mlp"] },
+  egfr: { what: "eGFR estimates how much blood your kidneys filter per minute, calculated from creatinine, age and sex.",
+    bands: [b("G1 · Normal or high", 90, null, "ok", "Normal filtering."), b("G2 · Mildly decreased", 60, 90, "border", "Often normal with age; check urine albumin."), b("G3a · Mild–moderate", 45, 60, "out", "Chronic kidney disease if persistent."), b("G3b · Moderate–severe", 30, 45, "out", "Needs medical care."), b("G4 · Severe", 15, 30, "out", "Specialist care."), b("G5 · Kidney failure", null, 15, "out", "Dialysis/transplant range.")],
+    high: "Normal.", low: "Below 60 for 3+ months defines chronic kidney disease.", affects: "Kidney health, hydration, muscle mass, blood pressure, blood sugar.", src: ["kdigo"] },
+  urea: { what: "Urea is the waste from protein breakdown, cleared by the kidneys.", bands: [b("Low", null, 17, "info", "Low protein intake or high fluid intake."), b("Normal", 17, 43, "ok", "Healthy."), b("High", 43, null, "border", "Dehydration, high protein or reduced kidney function.")],
+    high: "Dehydration, very high protein intake, or reduced kidney function.", low: "Usually low protein intake or good hydration; rarely liver issues.", affects: "Protein intake, hydration, kidneys, liver.", src: ["mlp"] },
+  bun: { what: "Blood urea nitrogen: the nitrogen part of urea.", bands: [b("Low", null, 8, "info", "Usually not significant."), b("Normal", 8, 20, "ok", "Healthy."), b("High", 20, null, "border", "Dehydration, high protein or kidney issues.")],
+    high: "Same as urea.", low: "Same as urea.", affects: "Protein intake, hydration, kidneys.", src: ["mlp"] },
+  bun_cr: { what: "BUN ÷ creatinine helps tell dehydration from kidney problems.", bands: [b("Low", null, 10, "info", "Low protein intake or good hydration."), b("Normal", 10, 20, "ok", "Balanced."), b("High", 20, null, "border", "Often dehydration or high protein.")],
+    high: "Points to dehydration, high protein intake or GI bleeding.", low: "Low protein intake, liver factors.", affects: "Hydration, diet.", src: ["mlp"] },
+  uric: { what: "Uric acid is the end product of purine breakdown (from food and your own cells). Above ~6.8 mg/dL it can form crystals in joints and kidneys.",
+    bands: [b("Low", null, 3.5, "info", "Rarely significant."), b("Normal", 3.5, 6.8, "ok", "Below the crystal-forming point."), b("Raised", 6.8, 9, "border", "Crystals can form; gout and kidney-stone risk rise."), b("High", 9, null, "out", "Substantially higher gout risk; often with insulin resistance.")],
+    high: "Can cause gout (sudden painful swollen joint) and kidney stones; persistently high levels are linked to high blood pressure, fatty liver and insulin resistance.", low: "Rarely a concern.",
+    affects: "Fructose and sugary drinks, alcohol (especially beer), belly fat/insulin resistance, dehydration, purine-rich foods (meat, seafood), hard exercise, some diuretics. Dairy tends to lower it.", src: ["mlp"] },
+  na: { what: "Sodium controls fluid balance and nerve signals.", bands: [b("Low", null, 136, "out", "Hyponatraemia: confusion, weakness if marked."), b("Normal", 136, 146, "ok", "Healthy."), b("High", 146, null, "out", "Usually dehydration.")],
+    high: "Usually not drinking enough water.", low: "Too much water, some medicines, hormone or kidney issues.", affects: "Hydration, medicines (diuretics), hormones.", src: ["mlp"] },
+  k: { what: "Potassium is essential for heart rhythm and muscle function.", bands: [b("Low", null, 3.5, "out", "Cramps, weakness, rhythm issues."), b("Normal", 3.5, 5.5, "ok", "Healthy."), b("High", 5.5, null, "out", "Can affect heart rhythm; may be a sample artefact.")],
+    high: "Kidney issues, some medicines; a haemolysed sample can falsely raise it.", low: "Vomiting, diarrhoea, diuretics.", affects: "Kidneys, medicines, diet, sample handling.", src: ["mlp"] },
+  cl: { what: "Chloride works with sodium to balance fluids and acidity.", bands: [b("Low", null, 101, "border", "Vomiting, some medicines."), b("Normal", 101, 109, "ok", "Healthy."), b("High", 109, null, "border", "Dehydration, acid–base changes.")],
+    high: "Dehydration, kidney acid–base issues.", low: "Vomiting, diuretics.", affects: "Hydration, acid–base balance.", src: ["mlp"] },
+  ca: { what: "Calcium is needed for bones, muscles, nerves and heart rhythm; tightly controlled by parathyroid hormone and vitamin D.",
+    bands: [b("Low", null, 8.8, "out", "Low vitamin D, low albumin or parathyroid issues."), b("Normal", 8.8, 10.6, "ok", "Healthy."), b("High", 10.6, null, "out", "Parathyroid issues or excess vitamin D supplements.")],
+    high: "Overactive parathyroid, excess vitamin D or calcium supplements, dehydration.", low: "Vitamin D deficiency, low albumin, low magnesium.", affects: "Vitamin D, parathyroid, albumin, supplements.", src: ["mlp"] },
+  phos: { what: "Phosphorus works with calcium for bones and energy.", bands: [b("Low", null, 2.5, "border", "Poor intake, vitamin D issues."), b("Normal", 2.5, 4.5, "ok", "Healthy."), b("High", 4.5, null, "border", "Kidney issues or high intake.")],
+    high: "Reduced kidney function, high intake.", low: "Malnutrition, vitamin D deficiency.", affects: "Kidneys, diet, vitamin D.", src: ["mlp"] },
+  mg: { what: "Magnesium supports muscles, nerves, heart rhythm and blood-sugar control.", bands: [b("Low", null, 1.7, "border", "Cramps, palpitations, poor sugar control."), b("Normal", 1.7, 2.4, "ok", "Healthy."), b("High", 2.4, null, "border", "Usually supplements with reduced kidney function.")],
+    high: "Supplement excess with kidney issues.", low: "Low intake, alcohol, diuretics, diarrhoea.", affects: "Diet (nuts, seeds, greens), alcohol, medicines.", src: ["odsMg"] },
+  uacr: { what: "Urine albumin-to-creatinine ratio detects small protein leaks from the kidneys, an early sign of kidney stress from blood pressure or blood sugar.",
+    bands: [b("A1 · Normal", null, 30, "ok", "No significant leak."), b("A2 · Moderately increased", 30, 300, "border", "Early kidney stress."), b("A3 · Severely increased", 300, null, "out", "Significant kidney damage.")],
+    high: "Early warning of kidney and blood-vessel damage.", low: "Normal.", affects: "Blood pressure, blood sugar, exercise before test.", src: ["kdigo"] },
+
+  /* ---------- Blood sugar ---------- */
+  fbs: { what: "Blood glucose after at least 8 hours without food.", bands: [b("Low", null, 70, "border", "Hypoglycaemia if symptomatic."), b("Normal", 70, 100, "ok", "Healthy."), b("Prediabetes", 100, 126, "border", "Impaired fasting glucose."), b("Diabetes range", 126, null, "out", "Needs confirmation and medical care.")],
+    high: "Sustained high sugar damages blood vessels, nerves, kidneys and eyes over years.", low: "Shakiness, sweating, confusion.", affects: "Diet, weight, activity, sleep, stress, illness, timing of last meal.", src: ["ada"] },
+  hba1c: { what: "HbA1c shows your average blood sugar over the past ~3 months (the share of haemoglobin coated with sugar).",
+    bands: [b("Normal", null, 5.7, "ok", "Healthy average sugar."), b("Prediabetes", 5.7, 6.5, "border", "Higher risk of type 2 diabetes; very reversible."), b("Diabetes range", 6.5, null, "out", "Needs confirmation and treatment.")],
+    high: "Long-term high sugar damages small and large blood vessels.", low: "Rarely an issue; can be falsely low with blood loss or haemolysis.",
+    affects: "Diet, weight, activity, sleep. Iron or B12 deficiency can falsely raise it; anaemia and recent blood loss can falsely lower it.", src: ["ada"] },
+  eag: { what: "Estimated average glucose, converted from HbA1c into mg/dL.", bands: [b("Normal", null, 117, "ok", "Equivalent to HbA1c below 5.7."), b("Prediabetes", 117, 140, "border", "HbA1c 5.7–6.4."), b("Diabetes range", 140, null, "out", "HbA1c 6.5+.")],
+    high: "Same as HbA1c.", low: "Not a concern.", affects: "Same as HbA1c.", src: ["ada"] },
+  insulin: { what: "Fasting insulin: how much insulin your body needs to keep fasting sugar normal. High values reveal insulin resistance years before sugar rises.",
+    bands: [b("Optimal", null, 10, "ok", "Good insulin sensitivity."), b("Raised", 10, 20, "border", "Early insulin resistance likely."), b("High", 20, null, "out", "Marked insulin resistance.")],
+    high: "Insulin resistance: drives fat storage, fatty liver, high triglycerides, low HDL, high uric acid and lower SHBG/testosterone.", low: "Normal when fasting; very low with high sugar suggests reduced insulin production.", affects: "Belly fat, inactivity, refined carbs, sleep loss.", src: ["mlp"] },
+  homa_ir: { what: "HOMA-IR combines fasting glucose and insulin into an insulin-resistance score.",
+    bands: [b("Insulin sensitive", null, 1.9, "ok", "Healthy."), b("Early resistance", 1.9, 2.9, "border", "Likely early insulin resistance."), b("Insulin resistant", 2.9, null, "out", "Significant insulin resistance.")],
+    high: "Insulin resistance (see fasting insulin).", low: "Good sensitivity.", affects: "Weight, activity, diet, sleep.", src: ["mlp"] },
+  ppbs: { what: "Blood sugar about 2 hours after a meal.", bands: [b("Normal", null, 140, "ok", "Healthy."), b("Prediabetes", 140, 200, "border", "Impaired glucose tolerance."), b("Diabetes range", 200, null, "out", "Needs medical care.")],
+    high: "Poor sugar handling after meals.", low: "Rare.", affects: "Meal size and carbs, activity after meals.", src: ["ada"] },
+
+  /* ---------- Thyroid ---------- */
+  tsh: { what: "TSH is the pituitary's signal telling the thyroid to make hormone. High TSH usually means the thyroid is underactive (the brain is shouting); low TSH usually means it's overactive.",
+    bands: [b("Low", null, 0.4, "out", "Possible overactive thyroid."), b("Normal", 0.4, 4.5, "ok", "Healthy thyroid signalling."), b("Mildly raised", 4.5, 10, "border", "Subclinical hypothyroidism if T4 normal; recheck."), b("High", 10, null, "out", "Underactive thyroid likely.")],
+    high: "Underactive thyroid: tiredness, weight gain, feeling cold, higher cholesterol.", low: "Overactive thyroid: palpitations, weight loss, anxiety, heat intolerance.", affects: "Thyroid health, iodine, illness, some medicines, biotin supplements (can distort the test).", src: ["mlp"] },
+  t3: { what: "Total T3, the active thyroid hormone (bound + free).", bands: [b("Low", null, 0.8, "border", "Underactive thyroid or illness."), b("Normal", 0.8, 2.0, "ok", "Healthy."), b("High", 2.0, null, "border", "Overactive thyroid.")],
+    high: "Overactive thyroid.", low: "Underactive thyroid, illness, calorie restriction.", affects: "Thyroid, illness, diet.", src: ["mlp"] },
+  t4: { what: "Total T4, the main thyroid hormone (bound + free).", bands: [b("Low", null, 5, "border", "Underactive thyroid."), b("Normal", 5, 12, "ok", "Healthy."), b("High", 12, null, "border", "Overactive thyroid or high binding proteins.")],
+    high: "Overactive thyroid.", low: "Underactive thyroid.", affects: "Thyroid, binding proteins, medicines.", src: ["mlp"] },
+  ft3: { what: "Free T3, the unbound, active thyroid hormone.", bands: [b("Low", null, 2.3, "border", "Underactive thyroid or illness."), b("Normal", 2.3, 4.2, "ok", "Healthy."), b("High", 4.2, null, "border", "Overactive thyroid.")],
+    high: "Overactive thyroid.", low: "Underactive thyroid, illness.", affects: "Thyroid health.", src: ["mlp"] },
+  ft4: { what: "Free T4, the unbound thyroid hormone; read together with TSH.", bands: [b("Low", null, 0.8, "border", "Underactive thyroid."), b("Normal", 0.8, 1.8, "ok", "Healthy."), b("High", 1.8, null, "border", "Overactive thyroid.")],
+    high: "Overactive thyroid.", low: "Underactive thyroid.", affects: "Thyroid health.", src: ["mlp"] },
+
+  /* ---------- Vitamins & iron ---------- */
+  b12: { what: "Vitamin B12 is needed for nerves, red blood cells and DNA. It comes almost only from animal foods (dairy, eggs, meat), so vegetarians are often low.",
+    bands: [b("Deficient", null, 200, "out", "Likely deficiency."), b("Borderline", 200, 300, "border", "Possible deficiency; a methylmalonic acid test can confirm."), b("Adequate", 300, null, "ok", "Healthy.")],
+    high: "Usually from supplements and harmless.", low: "Fatigue, tingling or numbness, poor memory, mood changes, anaemia, raised homocysteine; long-standing deficiency can damage nerves.", affects: "Diet (vegetarian), metformin and acid-reducers, gut absorption, supplements.", src: ["odsB12"] },
+  vitd: { what: "25-OH vitamin D reflects your vitamin D stores, from sunlight and diet. It controls calcium absorption and supports bones, muscles and immunity.",
+    bands: [b("Deficient", null, 12, "out", "Bone-softening risk."), b("Inadequate", 12, 20, "out", "Below what most people need."), b("Adequate (NIH)", 20, 30, "border", "Adequate for bones per NIH; many labs and the Endocrine Society aim for 30+."), b("Sufficient", 30, 50, "ok", "Healthy."), b("High", 50, null, "border", "Above ~60 ng/mL risk of adverse effects; review supplement dose.")],
+    high: "Too much (usually from high-dose supplements) can raise calcium: nausea, kidney stones.", low: "Weak bones, muscle aches, fatigue, low mood; linked to lower testosterone and insulin sensitivity.", affects: "Sun exposure, skin tone, body fat, supplements.", src: ["odsD"] },
+  folate: { what: "Folate (vitamin B9) supports red blood cells and DNA; works with B12.", bands: [b("Deficient", null, 3, "out", "Deficiency."), b("Borderline", 3, 5.4, "border", "Low-normal."), b("Normal", 5.4, null, "ok", "Healthy.")],
+    high: "Supplements; can mask B12 deficiency.", low: "Anaemia, raised homocysteine, fatigue.", affects: "Leafy greens, legumes, alcohol, some medicines.", src: ["odsFol"] },
+  iron: { what: "Serum iron is the iron circulating right now; it swings through the day, so it's read with TIBC, transferrin saturation and ferritin.",
+    bands: [b("Low", null, 60, "border", "Possible iron deficiency."), b("Normal", 60, 170, "ok", "Healthy."), b("High", 170, null, "border", "Recent supplements or iron overload.")],
+    high: "Recent iron intake, iron overload conditions.", low: "Iron deficiency, inflammation.", affects: "Time of day, recent meals and supplements, blood loss.", src: ["odsFe"] },
+  tibc: { what: "TIBC is how much iron your blood proteins could carry; it rises when iron is low.", bands: [b("Low", null, 250, "border", "Inflammation or iron overload."), b("Normal", 250, 400, "ok", "Healthy."), b("High", 400, null, "border", "Suggests iron deficiency.")],
+    high: "Iron deficiency.", low: "Chronic inflammation, iron overload, low protein.", affects: "Iron status.", src: ["odsFe"] },
+  uibc: { what: "Unsaturated iron-binding capacity: spare carrying capacity (TIBC − iron).", bands: [b("Low", null, 155, "info", "Little spare capacity."), b("Normal", 155, 355, "ok", "Healthy."), b("High", 355, null, "border", "Points to low iron.")],
+    high: "Iron deficiency.", low: "Iron overload.", affects: "Iron status.", src: ["odsFe"] },
+  tsat: { what: "Transferrin saturation: the % of iron-carrying capacity actually filled.", bands: [b("Low", null, 20, "out", "Iron deficiency likely."), b("Normal", 20, 45, "ok", "Healthy."), b("High", 45, null, "border", "Screen for iron overload.")],
+    high: "Possible iron overload (haemochromatosis).", low: "Iron deficiency.", affects: "Iron intake, blood loss.", src: ["odsFe"] },
+  ferritin: { what: "Ferritin reflects your stored iron. It's the best single test for iron deficiency, but it also rises with inflammation and fatty liver.",
+    bands: [b("Depleted", null, 30, "out", "Iron stores low."), b("Normal", 30, 300, "ok", "Healthy stores."), b("High", 300, null, "border", "Inflammation, fatty liver or iron overload.")],
+    high: "Inflammation, fatty liver, alcohol or iron overload.", low: "Iron deficiency: fatigue, hair fall, breathlessness, low exercise capacity.", affects: "Diet, blood loss, inflammation, liver health.", src: ["odsFe"] },
+
+  /* ---------- Hormones ---------- */
+  testo: { what: "Total testosterone, the main male sex hormone, made in the testes under signal from LH. Affects muscle, bone, energy, mood and libido. Highest in the morning, so test before 10 am.",
+    bands: [b("Low", null, 2.64, "out", "Below the Endocrine Society lower limit for young men (264 ng/dL)."), b("Low-normal", 2.64, 4, "border", "In range but on the lower side; check free testosterone and SHBG."), b("Normal", 4, 9.16, "ok", "Healthy range."), b("High", 9.16, null, "border", "Uncommon without supplements.")],
+    high: "Uncommon naturally; usually supplements or steroid use.", low: "Low energy, reduced libido, mood changes, muscle loss, fat gain. Total can read low when SHBG is low (insulin resistance) even if free testosterone is fine.",
+    affects: "Belly fat, insulin resistance, sleep, alcohol, stress, illness, time of day, high prolactin, ageing.", src: ["mlp"] },
+  ftesto: { what: "Free testosterone, the small unbound fraction (2–3%) that is fully active in tissues.", bands: [b("Low", null, 12.3, "out", "Low active testosterone."), b("Normal", 12.3, 46.6, "ok", "Healthy (lab range, pg/mL)."), b("High", 46.6, null, "border", "Above range.")],
+    high: "Uncommon; supplements.", low: "Symptoms of low testosterone even if total looks normal.", affects: "SHBG, total testosterone, weight, sleep.", src: ["mlp"] },
+  shbg: { what: "Sex hormone-binding globulin, a liver protein that binds and locks up testosterone.", bands: [b("Low", null, 10, "border", "Often insulin resistance or obesity; total testosterone reads lower."), b("Normal", 10, 57, "ok", "Typical for adult men (nmol/L)."), b("High", 57, null, "border", "Less free testosterone available.")],
+    high: "Less usable testosterone (ageing, hyperthyroidism, some medicines).", low: "Linked to insulin resistance, fatty liver and belly fat; lowers total testosterone readings.", affects: "Insulin resistance, weight, thyroid, liver, age.", src: ["mlp"] },
+  lh: { what: "LH is the pituitary signal that tells the testes to make testosterone.", bands: [b("Low", null, 1.24, "border", "Weak signal from the brain."), b("Normal", 1.24, 8.62, "ok", "Healthy signalling."), b("High", 8.62, null, "border", "Testes may be under-responding.")],
+    high: "With low testosterone: the testes aren't responding (primary).", low: "With low testosterone: the brain signal is weak (secondary), often obesity, stress, high prolactin.", affects: "Weight, stress, sleep, prolactin.", src: ["mlp"] },
+  fsh: { what: "FSH is the pituitary hormone driving sperm production.", bands: [b("Low", null, 1.27, "border", "Weak pituitary signal."), b("Normal", 1.27, 19.26, "ok", "Healthy."), b("High", 19.26, null, "border", "Possible testicular under-function.")],
+    high: "Testicular under-function.", low: "Pituitary signalling reduced.", affects: "Pituitary and testicular health.", src: ["mlp"] },
+  prolactin: { what: "Prolactin is a pituitary hormone. In men, high prolactin can suppress testosterone and libido.",
+    bands: [b("Normal", null, 15, "ok", "Typical (ng/mL); lab ranges vary."), b("Mildly raised", 15, 30, "border", "Often stress, sleep, recent exercise or medicines; recheck."), b("High", 30, null, "out", "Needs evaluation (medicines, pituitary).")],
+    high: "Can lower testosterone and libido; causes include stress, poor sleep, some medicines, underactive thyroid, macroprolactin (harmless form) or a pituitary adenoma.", low: "Rarely significant.", affects: "Stress, sleep, timing (higher after waking), medicines, thyroid.", src: ["mlp"] },
+  estradiol: { what: "Estradiol, the main estrogen; in men it's made mostly from testosterone in fat tissue.", bands: [b("Low", null, 10, "border", "May affect bones and libido."), b("Normal", 10, 40, "ok", "Typical for men (pg/mL)."), b("High", 40, null, "border", "Often excess body fat converting testosterone.")],
+    high: "In men: excess body fat, liver disease; can lower testosterone.", low: "Bone loss, low libido.", affects: "Body fat, alcohol, liver.", src: ["mlp"] },
+  cortisol: { what: "Cortisol is the main stress hormone; highest in the morning.", bands: [b("Low", null, 6, "border", "Morning value low."), b("Normal (morning)", 6, 23, "ok", "Healthy."), b("High", 23, null, "border", "Stress, illness, poor sleep or medicines.")],
+    high: "Chronic stress, sleep loss, steroids; rarely Cushing's.", low: "Rarely adrenal insufficiency.", affects: "Time of day, stress, sleep, steroids.", src: ["mlp"] },
+
+  /* ---------- Blood count ---------- */
+  hb: { what: "Haemoglobin is the oxygen-carrying protein in red blood cells.", bands: [b("Low (anaemia)", null, 13, "out", "Anaemia in men."), b("Normal", 13, 17, "ok", "Healthy."), b("High", 17, null, "border", "Dehydration, smoking, altitude, sleep apnoea.")],
+    high: "Thicker blood; dehydration, smoking, sleep apnoea, testosterone therapy.", low: "Fatigue, breathlessness, pale skin; iron/B12 deficiency or blood loss.", affects: "Iron, B12, folate, hydration, smoking.", src: ["mlp"] },
+  pcv: { what: "Haematocrit (PCV): the % of blood made up of red cells.", bands: [b("Low", null, 40, "border", "Anaemia."), b("Normal", 40, 50, "ok", "Healthy."), b("High", 50, null, "border", "Dehydration or excess red cells.")],
+    high: "Dehydration, smoking, sleep apnoea.", low: "Anaemia.", affects: "Hydration, iron.", src: ["mlp"] },
+  rbc: { what: "Red blood cell count.", bands: [b("Low", null, 4.5, "border", "Anaemia."), b("Normal", 4.5, 5.5, "ok", "Healthy."), b("High", 5.5, null, "border", "With small cells: possible thalassaemia trait; otherwise dehydration.")],
+    high: "With low MCV, a high count suggests thalassaemia trait rather than iron deficiency.", low: "Anaemia.", affects: "Genetics, hydration, iron.", src: ["mlp"] },
+  mcv: { what: "Mean corpuscular volume: the average size of your red cells.", bands: [b("Small (microcytic)", null, 80, "out", "Iron deficiency or thalassaemia trait."), b("Normal", 80, 100, "ok", "Healthy."), b("Large (macrocytic)", 100, null, "out", "B12/folate deficiency, alcohol, thyroid.")],
+    high: "B12 or folate deficiency, alcohol, liver or thyroid issues.", low: "Iron deficiency or an inherited thalassaemia trait.", affects: "Iron, B12, folate, genetics.", src: ["mlp"] },
+  mch: { what: "Mean corpuscular haemoglobin: haemoglobin per red cell.", bands: [b("Low", null, 27, "border", "Iron deficiency or thalassaemia trait."), b("Normal", 27, 32, "ok", "Healthy."), b("High", 32, null, "border", "Large cells (B12/folate).")],
+    high: "Large cells.", low: "Small, pale cells.", affects: "Iron, genetics, B12.", src: ["mlp"] },
+  mchc: { what: "Haemoglobin concentration inside red cells.", bands: [b("Low", null, 31.5, "border", "Iron deficiency."), b("Normal", 31.5, 34.5, "ok", "Healthy."), b("High", 34.5, null, "border", "Rare cell-shape conditions or sample issues.")],
+    high: "Spherocytosis or sample artefact.", low: "Iron deficiency.", affects: "Iron status.", src: ["mlp"] },
+  rdw_cv: { what: "Red cell distribution width: how varied your red cells are in size.", bands: [b("Normal", null, 14, "ok", "Uniform cells."), b("High", 14, null, "border", "Mixed sizes: often early iron, B12 or folate deficiency.")],
+    high: "Suggests nutritional deficiency in progress.", low: "Not a concern.", affects: "Iron, B12, folate.", src: ["mlp"] },
+  rdw_sd: { what: "RDW measured in femtolitres.", bands: [b("Low", null, 39, "info", "Very uniform cells; often seen with small cells."), b("Normal", 39, 46, "ok", "Healthy."), b("High", 46, null, "border", "Mixed sizes.")],
+    high: "Nutritional deficiency.", low: "Usually not significant.", affects: "Iron, B12.", src: ["mlp"] },
+  tlc: { what: "Total white blood cell count: your immune cells.", bands: [b("Low", null, 4, "border", "Viral illness, medicines, B12 deficiency."), b("Normal", 4, 10, "ok", "Healthy."), b("High", 10, null, "border", "Infection, inflammation, stress, smoking.")],
+    high: "Infection, inflammation, stress, steroids.", low: "Viral infection, nutritional deficiency, medicines.", affects: "Infection, stress, smoking.", src: ["mlp"] },
+  neut: { what: "Neutrophils: the first responders to bacterial infection (% of WBC).", bands: [b("Low", null, 40, "border", ""), b("Normal", 40, 80, "ok", "Healthy."), b("High", 80, null, "border", "Bacterial infection or stress.")],
+    high: "Bacterial infection, stress, steroids.", low: "Viral illness, some medicines.", affects: "Infection, stress.", src: ["mlp"] },
+  lymph: { what: "Lymphocytes: immune cells fighting viruses (% of WBC).", bands: [b("Low", null, 20, "border", "Stress or steroids."), b("Normal", 20, 40, "ok", "Healthy."), b("High", 40, null, "border", "Viral infection.")],
+    high: "Viral infection.", low: "Stress, steroids.", affects: "Infection, stress.", src: ["mlp"] },
+  mono: { what: "Monocytes: clean-up immune cells (% of WBC).", bands: [b("Normal", 2, 10, "ok", "Healthy."), b("High", 10, null, "border", "Recovery from infection, chronic inflammation.")],
+    high: "Chronic inflammation, infection recovery.", low: "Rarely significant.", affects: "Infection, inflammation.", src: ["mlp"] },
+  eos: { what: "Eosinophils: cells involved in allergy and parasites (% of WBC).", bands: [b("Normal", 1, 6, "ok", "Healthy."), b("High", 6, null, "border", "Allergy, asthma, parasites.")],
+    high: "Allergies, asthma, parasitic infection.", low: "Not significant.", affects: "Allergies.", src: ["mlp"] },
+  baso: { what: "Basophils: rare allergy-related cells (% of WBC).", bands: [b("Normal", 0, 2, "ok", "Healthy."), b("High", 2, null, "border", "Allergy or inflammation.")],
+    high: "Allergy, inflammation.", low: "Not significant.", affects: "Allergies.", src: ["mlp"] },
+  anc: { what: "Absolute neutrophil count.", bands: [b("Low", null, 2, "border", "Lower bacterial defence."), b("Normal", 2, 7, "ok", "Healthy."), b("High", 7, null, "border", "Infection or stress.")], high: "Infection, stress.", low: "Reduced defence.", affects: "Infection.", src: ["mlp"] },
+  alc: { what: "Absolute lymphocyte count.", bands: [b("Low", null, 1, "border", "Stress, steroids."), b("Normal", 1, 3, "ok", "Healthy."), b("High", 3, null, "border", "Viral infection.")], high: "Viral infection.", low: "Stress.", affects: "Infection.", src: ["mlp"] },
+  amc: { what: "Absolute monocyte count.", bands: [b("Normal", 0.2, 1, "ok", "Healthy."), b("High", 1, null, "border", "Inflammation.")], high: "Inflammation.", low: "Not significant.", affects: "Inflammation.", src: ["mlp"] },
+  aec: { what: "Absolute eosinophil count.", bands: [b("Normal", 0.02, 0.5, "ok", "Healthy."), b("High", 0.5, null, "border", "Allergy or parasites.")], high: "Allergy, parasites.", low: "Not significant.", affects: "Allergies.", src: ["mlp"] },
+  abc: { what: "Absolute basophil count.", bands: [b("Normal", 0.02, 0.1, "ok", "Healthy."), b("High", 0.1, null, "border", "Allergy.")], high: "Allergy.", low: "Not significant.", affects: "Allergies.", src: ["mlp"] },
+  plt: { what: "Platelets help blood clot.", bands: [b("Low", null, 150, "out", "Bleeding/bruising risk if very low."), b("Normal", 150, 410, "ok", "Healthy."), b("High", 410, null, "border", "Inflammation, iron deficiency.")],
+    high: "Inflammation, iron deficiency, infection.", low: "Viral illness (e.g. dengue), liver issues, medicines.", affects: "Infection, liver, iron.", src: ["mlp"] },
+  mpv: { what: "Mean platelet volume: average platelet size.", bands: [b("Normal", 7, 11, "ok", "Typical (labs vary)."), b("High", 11, null, "info", "Younger, larger platelets.")], high: "Usually not significant alone.", low: "Not significant alone.", affects: "Platelet turnover.", src: ["mlp"] },
+  mentzer: { what: "Mentzer index = MCV ÷ RBC count. Used when red cells are small to suggest the cause.", bands: [b("Below 13", null, 13, "border", "Suggests thalassaemia trait."), b("Above 13", 13, null, "border", "Suggests iron deficiency.")],
+    high: "Points to iron deficiency (when cells are small).", low: "Points to thalassaemia trait (a harmless inherited condition in carriers); haemoglobin electrophoresis confirms.", affects: "Only meaningful when MCV is low.", src: ["mlp"] },
+  rdwi: { what: "RDW index = MCV × RDW ÷ RBC; another screen for small-cell causes.", bands: [b("Below 220", null, 220, "border", "Favours thalassaemia trait."), b("Above 220", 220, null, "border", "Favours iron deficiency.")], high: "Iron deficiency.", low: "Thalassaemia trait.", affects: "Only meaningful with small cells.", src: ["mlp"] },
+  gk: { what: "Green & King index, a third screen for small-cell causes.", bands: [b("Below 65", null, 65, "border", "Favours thalassaemia trait."), b("Above 65", 65, null, "border", "Favours iron deficiency.")], high: "Iron deficiency.", low: "Thalassaemia trait.", affects: "Only meaningful with small cells.", src: ["mlp"] },
+  nlr: { what: "Neutrophil ÷ lymphocyte ratio, a simple inflammation/stress marker.", bands: [b("Typical", 1, 3, "ok", "Healthy."), b("Raised", 3, null, "border", "Inflammation or stress.")], high: "Systemic inflammation or stress.", low: "Not significant.", affects: "Infection, stress.", src: ["mlp"] },
+  plr: { what: "Platelet ÷ lymphocyte ratio.", bands: [b("Typical", 50, 200, "ok", "Healthy."), b("Raised", 200, null, "border", "Inflammation.")], high: "Inflammation.", low: "Not significant.", affects: "Inflammation.", src: ["mlp"] },
+  esr: { what: "ESR: how fast red cells settle; a non-specific inflammation marker.", bands: [b("Normal", null, 15, "ok", "Men under 50."), b("Raised", 15, 50, "border", "Inflammation or infection."), b("High", 50, null, "out", "Needs evaluation.")], high: "Inflammation, infection, autoimmune conditions.", low: "Not significant.", affects: "Inflammation, anaemia, age.", src: ["mlp"] },
+
+  /* ---------- Inflammation & other ---------- */
+  hscrp: { what: "High-sensitivity CRP measures low-grade inflammation in the blood vessels; used for heart-risk assessment when you're well.",
+    bands: [b("Low risk", null, 1, "ok", "Low cardiovascular risk."), b("Average risk", 1, 3, "border", "Average risk."), b("High risk", 3, 10, "out", "Higher heart risk (recheck when well)."), b("Acute inflammation", 10, null, "out", "Likely infection/injury; the risk scale doesn't apply.")],
+    high: "Chronic low-grade inflammation, linked to belly fat, insulin resistance and heart disease.", low: "Favourable.", affects: "Body fat, recent illness, poor sleep, smoking, hard exercise.", src: ["crp"] },
+  crp: { what: "C-reactive protein, a general inflammation marker made by the liver.", bands: [b("Normal", null, 5, "ok", "No significant inflammation."), b("Raised", 5, 10, "border", "Mild inflammation."), b("High", 10, null, "out", "Infection or inflammation.")], high: "Infection, injury, inflammation.", low: "Normal.", affects: "Illness, injury, body fat.", src: ["crp"] },
+  homocys: { what: "Homocysteine is an amino acid cleared with the help of B12, folate and B6. High levels damage blood vessels.",
+    bands: [b("Normal", 5, 15, "ok", "Healthy."), b("Moderately high", 15, 30, "border", "Often B12/folate deficiency."), b("Intermediate", 30, 100, "out", "Usually significant B12/folate deficiency."), b("Severe", 100, null, "out", "Needs specialist care.")],
+    high: "Raises risk of artery damage and clots; very often due to low B12 or folate, which is common in vegetarians.", low: "Not a concern.", affects: "B12, folate, B6, kidney function, genetics (MTHFR).", src: ["odsB12", "odsFol"] },
+  rf: { what: "Rheumatoid factor, an antibody sometimes found in rheumatoid arthritis.", bands: [b("Negative", null, 14, "ok", "Normal."), b("Positive", 14, null, "border", "Interpret with joint symptoms.")], high: "Can support a rheumatoid arthritis diagnosis; also seen in some healthy people.", low: "Normal.", affects: "Autoimmune conditions, age, infections.", src: ["mlp"] },
+  ige: { what: "Total IgE, the antibody class behind allergies.", bands: [b("Normal (adult)", null, 100, "ok", "Typical."), b("Raised", 100, null, "border", "Allergic tendency or parasites.")], high: "Allergies (dust, pollen), eczema, asthma, parasites.", low: "Not significant.", affects: "Allergies.", src: ["mlp"] },
+  ck: { what: "Creatine kinase, a muscle enzyme; rises after hard exercise or muscle injury.", bands: [b("Normal", null, 200, "ok", "Typical for men (labs vary)."), b("Raised", 200, 1000, "border", "Often recent hard training."), b("High", 1000, null, "out", "Significant muscle breakdown.")], high: "Recent intense exercise, muscle injury, some medicines (statins).", low: "Not significant.", affects: "Exercise in the 48–72 h before the test, muscle mass.", src: ["mlp"] },
+  ckmb: { what: "CK-MB, the heart-related fraction of creatine kinase.", bands: [b("Normal", null, 5, "ok", "Normal."), b("Raised", 5, null, "border", "Interpret with symptoms; troponin is preferred for heart injury.")], high: "Heart or heavy muscle strain.", low: "Normal.", affects: "Heart, muscle.", src: ["mlp"] },
+  ldh: { what: "Lactate dehydrogenase, an enzyme in most tissues; a non-specific marker of tissue breakdown.", bands: [b("Normal", null, 250, "ok", "Typical."), b("Raised", 250, null, "border", "Non-specific; often muscle or red-cell breakdown.")], high: "Muscle strain, haemolysis, liver or other tissue injury.", low: "Not significant.", affects: "Exercise, sample handling.", src: ["mlp"] },
+  psa: { what: "Prostate-specific antigen, a protein from the prostate.", bands: [b("Normal for under 50", null, 2.5, "ok", "Typical."), b("Grey zone", 2.5, 4, "border", "Discuss with a doctor."), b("Raised", 4, null, "out", "Needs evaluation.")], high: "Prostate enlargement, inflammation or, less often, cancer; also after cycling or ejaculation.", low: "Normal.", affects: "Age, prostate size, recent cycling/ejaculation.", src: ["mlp"] },
+  afp: { what: "Alpha-fetoprotein, a protein used to monitor certain liver and testicular conditions.", bands: [b("Normal", null, 9, "ok", "Typical."), b("Raised", 9, null, "border", "Needs context.")], high: "Liver disease or rare tumours.", low: "Normal.", affects: "Liver health.", src: ["mlp"] },
+  cea: { what: "Carcinoembryonic antigen, mainly used to monitor known cancers, not to screen.", bands: [b("Normal (non-smoker)", null, 3, "ok", "Typical."), b("Raised", 3, 5, "border", "Smoking, inflammation."), b("High", 5, null, "out", "Needs evaluation.")], high: "Smoking, inflammation, some cancers.", low: "Normal.", affects: "Smoking, gut inflammation.", src: ["mlp"] },
+  ca199: { what: "CA 19-9, a marker used to monitor some gut/pancreatic conditions.", bands: [b("Normal", null, 37, "ok", "Typical."), b("Raised", 37, null, "border", "Needs context (bile-duct blockage, pancreatitis).")], high: "Bile-duct blockage, pancreatitis, rarely cancer.", low: "Normal.", affects: "Bile ducts, pancreas.", src: ["mlp"] }
+};
+
+/* ================= Marker explainer: pop-up ================= */
+// Units the built-in bands are written in. Bands are only placed against your value when your lab uses the same unit.
+const MUNIT = (() => {
+  const m = {}, set = (u, ks) => ks.split(" ").forEach(k => m[k] = u);
+  set("mg/dl", "tc tg hdl ldl vldl nonhdl apob lpa bili_t bili_d bili_i creat urea bun uric ca phos mg fbs ppbs eag");
+  set("", "tc_hdl ldl_hdl hdl_ldl ag ast_alt nafld bun_cr homa_ir mentzer rdwi gk nlr plr");
+  set("u/l", "alt ast ggt alp amylase lipase ck ldh");
+  set("g/dl", "protein albumin globulin hb mchc");
+  set("ml/min/1.73m2", "egfr"); set("mmol/l", "na k cl"); set("mg/g", "uacr");
+  set("%", "hba1c pcv rdw_cv neut lymph mono eos baso tsat");
+  set("uiu/ml", "tsh insulin"); set("ng/ml", "t3 testo prolactin vitd ferritin folate psa afp cea ckmb");
+  set("ug/dl", "t4 iron tibc uibc cortisol"); set("pg/ml", "ft3 b12 ftesto estradiol"); set("ng/dl", "ft4");
+  set("nmol/l", "shbg"); set("miu/ml", "lh fsh"); set("10^6/ul", "rbc"); set("10^3/ul", "tlc anc alc amc aec abc plt");
+  set("fl", "mcv mpv rdw_sd"); set("pg", "mch"); set("mm/h", "esr"); set("mg/l", "hscrp crp"); set("umol/l", "homocys");
+  set("iu/ml", "rf ige"); set("u/ml", "ca199");
+  return m;
+})();
+const normU = u => String(u ?? "").toLowerCase().replace(/\s+/g, "").replace(/[µμ]/g, "u").replace(/mcg/g, "ug").replace(/^gm/, "g").replace(/^mlu/, "miu")
+  .replace(/²/g, "2").replace(/³/g, "^3").replace(/⁶/g, "^6").replace(/^x?10\^?(\d)/, "10^$1").replace(/(cumm|mm3)$/, "ul").replace(/^k\/ul$/, "10^3/ul")
+  .replace(/^thou\/ul$/, "10^3/ul").replace(/^mill\/ul$/, "10^6/ul").replace(/^mg%$/, "mg/dl").replace(/^miu\/l$/, "uiu/ml").replace(/^mm\/(1st)?h(ou)?r?$/, "mm/h")
+  .replace(/^(ratio|-)$/, "");
+
+const markerInfo = k => { const g = S.mInfo?.[k]; if (MARKER_INFO[k]) return { ...MARKER_INFO[k], unit: MUNIT[k], builtin: true }; return g ? { ...g, generated: true } : null; };
+const bandOf = (info, v) => (info?.bands || []).find(x => (x.min == null || v >= x.min) && (x.max == null || v < x.max)) || null;
+const bandRange = x => x.min == null ? `below ${fmtN(x.max)}` : x.max == null ? `${fmtN(x.min)} and above` : `${fmtN(x.min)} – ${fmtN(x.max)}`;
+const TONE = { ok: "ok", border: "border", out: "out", info: "info" };
+
+let mxKey = null, mxGen = {};
+function openMarker(key){
+  if (!D || !D.series[key]) return;
+  mxKey = key;
+  const s = D.series[key], last = s[s.length - 1], p = last.p, st = statusOf(p), v = numVal(p.value);
+  const info = markerInfo(key);
+  const unitOK = info && info.unit !== undefined && normU(info.unit) === normU(p.unit);
+  const here = info && unitOK && v != null ? bandOf(info, v) : null;
+  const showU = unitOK ? p.unit : (info?.unit || "");
+  const srcs = (info?.src || []).map(x => MSRC[x]).filter(Boolean);
+  const labRanges = [...new Map(s.filter(e => e.p.ref).map(e => [e.p.ref + "|" + (e.p.unit || ""), e])).values()];
+  const repOf = rid => S.reports.find(r => r.id === rid);
+
+  const bandsHTML = info?.bands?.length ? `<div class="mx-bands">${info.bands.map(x => `
+      <div class="mx-band ${TONE[x.tone] || "info"}${here === x ? " here" : ""}">
+        <div class="mx-bl"><b>${esc(x.l)}</b><span class="mono">${esc(bandRange(x))}${showU ? " " + esc(showU) : ""}</span></div>
+        <div class="mx-bm">${esc(x.m || "")}</div>
+        ${here === x ? `<div class="mx-you">You are here: <b class="mono">${fmtN(v)}</b></div>` : ""}
+      </div>`).join("")}</div>
+      ${info && !unitOK && info.unit !== undefined ? `<p class="small muted">These bands are in ${esc(info.unit || "a different unit")}; your lab reports ${esc(p.unit || "no unit")}, so your value isn't placed on them. Use your lab's own range below.</p>` : ""}`
+    : "";
+
+  const rows = s.slice().reverse().map(e => { const vv = numVal(e.p.value), bb = info && unitOK && vv != null ? bandOf(info, vv) : null, rp = repOf(e.rid), es = statusOf(e.p);
+    return `<tr><td>${fmtD(e.date)}${rp?.lab ? `<div class="small muted">${esc(rp.lab)}</div>` : ""}</td><td class="mono" style="text-align:right">${fmtN(vv ?? e.p.value)} <span class="small muted">${esc(e.p.unit || "")}</span></td>
+      <td>${chip(es)}</td><td>${bb ? `<span class="chip ${TONE[bb.tone] || "info"}">${esc(bb.l)}</span>` : `<span class="small muted">—</span>`}</td></tr>`; }).join("");
+
+  const body = info ? `
+      <section><h3>What it is</h3><p>${esc(info.what)}</p></section>
+      ${bandsHTML ? `<section><h3>What the ranges mean</h3>${bandsHTML}</section>` : ""}
+      <div class="grid g2" style="gap:12px">
+        <section class="mx-box"><h3>If it's high</h3><p>${esc(info.high || "—")}</p></section>
+        <section class="mx-box"><h3>If it's low</h3><p>${esc(info.low || "—")}</p></section>
+      </div>
+      ${info.affects ? `<section><h3>What moves it</h3><p>${esc(info.affects)}</p></section>` : ""}`
+    : `<section id="mxGenBox"><div class="notice">${S.settings?.anthropic_key ? "Writing an explanation for this test…" : "There's no built-in explanation for this test yet. Add your Claude API key in Settings and one will be written and saved the first time you open it."}</div></section>`;
+
+  $("#sheetRoot").innerHTML = `<div class="sheet-bg" id="mxBg"><div class="sheet mx" role="dialog" aria-modal="true" aria-labelledby="mxT">
+    <div class="card-h" style="margin:0;align-items:flex-start">
+      <div style="min-width:0"><div class="eyebrow">${esc(catName(p.cat))}</div><h2 id="mxT" style="margin:2px 0 6px">${esc(p.name)}</h2>
+        <div class="row" style="gap:8px;flex-wrap:wrap"><span class="mval">${fmtN(v ?? p.value)} <small>${esc(p.unit || "")}</small></span>${chip(st)}${here ? `<span class="chip ${TONE[here.tone] || "info"}">${esc(here.l)}</span>` : ""}<span class="small muted">${fmtD(last.date)}</span></div></div>
+      <button class="iconbtn" id="mxX" aria-label="Close">✕</button>
+    </div>
+    ${body}
+    <section><h3>Your lab's range</h3><p>${labRanges.length ? labRanges.map(e => `<span class="mono">${esc(e.p.ref)}</span> ${esc(e.p.unit || "")}${labRanges.length > 1 ? ` <span class="small muted">(${esc(repOf(e.rid)?.lab || fmtShort(e.date))})</span>` : ""}`).join(" · ") : "Not printed on the report."}
+      <span class="small muted">Labs set their own ranges, so they can differ from the bands above. Your status chip uses the lab's range.</span></p></section>
+    <section><h3>Your results</h3>
+      ${s.filter(e => numVal(e.p.value) != null).length > 1 ? `<div class="chart" id="mxChart" style="margin-bottom:8px"></div>` : ""}
+      <div style="overflow-x:auto"><table class="mx-t"><thead><tr><th>Test date</th><th style="text-align:right">Value</th><th>Lab range</th><th>Band</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+    ${srcs.length ? `<section class="small"><h3>Sources</h3>${srcs.map(x => `<a href="${esc(x.u)}" target="_blank" rel="noopener">${esc(x.t)}</a>`).join("<br>")}</section>` : ""}
+    ${info?.generated ? `<p class="small muted">Written by Claude from general medical knowledge when this test first appeared in your reports, then saved. Not checked against a guideline.</p>` : ""}
+    <p class="small muted">General information to help you read your report, not a diagnosis. Discuss results with your doctor.</p>
+    <div class="row" style="justify-content:flex-end"><button class="btn" id="mxHist">Open in History</button><button class="btn primary" id="mxClose">Done</button></div>
+  </div></div>`;
+
+  const close = () => { $("#sheetRoot").innerHTML = ""; mxKey = null; document.removeEventListener("keydown", onEsc); };
+  const onEsc = e => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onEsc);
+  $("#mxX").onclick = close; $("#mxClose").onclick = close;
+  $("#mxBg").onclick = e => { if (e.target.id === "mxBg") close(); };
+  $("#mxHist").onclick = () => { close(); S.histCat = CATS[p.cat] ? p.cat : "other"; S.histKey = key; go("history"); };
+  $("#mxX").focus();
+  const ch = $("#mxChart");
+  if (ch) lineChart(ch, s.map(e => ({ x: e.date, y: numVal(e.p.value), st: statusOf(e.p) })).filter(x => x.y != null), { low: p.low, high: p.high, unit: p.unit, h: 170, aria: `${p.name} over time` });
+  if (!info && S.settings?.anthropic_key) genMarkerInfo([key]).then(() => { if (mxKey === key && markerInfo(key)) openMarker(key); })
+    .catch(e => { const b = $("#mxGenBox"); if (b && mxKey === key) b.innerHTML = `<div class="notice">Couldn't write an explanation: ${esc(e.message || e.code || e)}</div>`; });
+}
+
+/* Explanations for tests not in the built-in list: written once by Claude, saved to your marker_info table */
+async function genMarkerInfo(keys){
+  keys = [...new Set(keys)].filter(k => !markerInfo(k) && D?.series[k] && !mxGen[k]);
+  if (!keys.length || !S.settings?.anthropic_key) return;
+  keys.forEach(k => mxGen[k] = true);
+  try {
+    for (let i = 0; i < keys.length; i += 12) {
+      const chunk = keys.slice(i, i + 12);
+      const list = chunk.map(k => { const p = D.latest[k].p; return `- key "${k}": ${p.name} (unit: ${p.unit || "none"}; lab range: ${p.ref || "none"})`; }).join("\n");
+      const prompt = `You write plain-English explanations of blood-test markers for an adult man in India reading his own lab report. For each marker below, return general educational information (not advice about his values).
+
+${list}
+
+Return ONLY JSON: an object keyed by the exact key, each value:
+{"what": "1-2 sentences: what it measures and why it matters",
+ "unit": "the unit your bands use, written exactly like the unit given above if you use it",
+ "bands": [{"l": "band label", "min": number or null, "max": number or null, "tone": "ok" | "border" | "out", "m": "one short sentence: what this band means"}],
+ "high": "what a high value can mean and its effects on the body",
+ "low": "what a low value can mean and its effects on the body",
+ "affects": "common things that raise or lower it"}
+Bands must be contiguous (one band's max equals the next band's min), use widely accepted clinical cut-offs for adult men in the unit given, and use null for open ends. If there are no meaningful cut-offs, return "bands": []. No URLs.`;
+      const r = await claudeCall([{ type: "text", text: prompt }], { maxTokens: 900 * chunk.length + 400 });
+      const j = parseJSONLoose(r.text);
+      if (!j || typeof j !== "object") throw { message: "Claude's reply wasn't readable." };
+      const rows = [];
+      for (const k of chunk) { const x = j[k]; if (!x || typeof x.what !== "string") continue;
+        const info = { what: String(x.what), unit: typeof x.unit === "string" ? x.unit : undefined, high: String(x.high || ""), low: String(x.low || ""), affects: String(x.affects || ""),
+          bands: (Array.isArray(x.bands) ? x.bands : []).filter(y => y && y.l).slice(0, 8).map(y => b(String(y.l), typeof y.min === "number" ? y.min : null, typeof y.max === "number" ? y.max : null, ["ok", "border", "out"].includes(y.tone) ? y.tone : "info", String(y.m || ""))) };
+        (S.mInfo ||= {})[k] = info; rows.push({ user_id: S.uid, key: k, info }); }
+      if (rows.length && SB && S.uid) { const { error } = await SB.from("marker_info").upsert(rows, { onConflict: "user_id,key" }); if (error) console.warn("marker_info save:", error.message); }
+    }
+  } finally { keys.forEach(k => delete mxGen[k]); }
+}
+// After a report is saved: write explanations for any tests it introduced, in the background
+function explainNewMarkers(){
+  if (!D) return;
+  const keys = Object.keys(D.series).filter(k => !markerInfo(k));
+  if (keys.length) genMarkerInfo(keys).catch(e => console.warn("marker explanations:", e.message || e));
+}
+async function loadMarkerInfo(){
+  if (!SB || !S.uid) return;
+  const { data, error } = await SB.from("marker_info").select("key,info");
+  if (error) { S.mInfo = S.mInfo || {}; return; } // table not created yet: built-in explanations still work
+  S.mInfo = Object.fromEntries((data || []).map(r => [r.key, r.info]));
+}
 
 /* ---- boot ---- */
 document.addEventListener("click", e => { const a = e.target.closest('a[href="#settings"]'); if (a) { e.preventDefault(); go("settings"); } });
