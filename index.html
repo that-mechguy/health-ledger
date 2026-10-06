@@ -500,6 +500,12 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
       <div class="card-h"><h2>Apple Health sync</h2><span class="hint" id="syncHint"></span></div>
       <div id="syncSetup"><div class="empty">Loading…</div></div>
     </div>
+    <div class="card" id="glCard">
+      <div class="card-h"><h2>Fitbit, direct from Google</h2><span class="hint" id="glHint"></span></div>
+      <p class="small" style="margin:0 0 10px">Reads your Fitbit's steps, heart rate, resting heart rate, HRV, blood oxygen, breathing rate and sleep straight from your Google account every 15 minutes, without waiting for Apple Health. Once connected, it becomes your primary device.</p>
+      <div id="glBox"><div class="empty small">Loading…</div></div>
+      <div class="small" id="glMsg" style="margin-top:6px"></div>
+    </div>
     <div class="card">
       <div class="card-h"><h2>Primary device</h2><span class="hint" id="pdState"></span></div>
       <p class="small" style="margin:0 0 10px">Pick the device you wear all day (e.g. your Fitbit). On any day it has data, only its steps, sleep and heart readings are used; other devices fill in only days it has nothing. Choose “Combine all devices” to merge them instead.</p>
@@ -1230,7 +1236,8 @@ async function loadAll(){
       fetchAllHealth(),
       SB.from("user_settings").select("*").maybeSingle(),
       SB.from("ingest_keys").select("key,created_at,last_used").order("created_at"),
-      loadMarkerInfo().catch(() => {})
+      loadMarkerInfo().catch(() => {}),
+      loadGoogle().catch(() => {})
     ]);
     if (r.error) throw r.error;
     S.reports = r.data.map(x => ({ ...x.doc, id: x.id, type: x.type, date: x.date, filePath: x.file_path }));
@@ -1452,8 +1459,14 @@ async function saveReview(){
 /* ---- activity: sync card + sleep & heart ---- */
 const ago = iso => { if (!iso) return "never"; const m = (Date.now() - new Date(iso).getTime()) / 60000; if (m < 2) return "just now"; if (m < 60) return Math.round(m) + " min ago"; if (m < 48*60) return Math.round(m/60) + " h ago"; return Math.round(m/1440) + " days ago"; };
 const mainSrc = () => S.settings?.primary_source || "";
-const viaTxt = () => mainSrc() ? `${mainSrc()} (via Apple Health)` : "Apple Health";
+const viaTxt = () => mainSrc() === "Fitbit (Google)" ? "Fitbit (direct from Google)" : mainSrc() ? `${mainSrc()} (via Apple Health)` : "Apple Health";
 function renderSyncCard(){
+  if (mainSrc() === "Fitbit (Google)" && S.gl && !S.gl.missing) {
+    const g = S.gl, fresh = g.last_sync && Date.now() - new Date(g.last_sync) < 45 * 60e3;
+    $("#syncCard").innerHTML = `<div class="row" style="justify-content:space-between"><div><span class="sync-dot" style="background:${g.last_error ? "var(--bad)" : fresh ? "var(--ok)" : "var(--warn)"}"></span><b>${g.last_error ? "Fitbit sync problem" : "Syncing directly from Fitbit"}</b>
+      <div class="small muted">Last fetch ${ago(g.last_sync)} · every 15 minutes${S.sync.lastUsed ? ` · Apple Health last delivered ${ago(S.sync.lastUsed)} (fills days Fitbit has nothing)` : ""}</div></div><a class="btn" href="#settings">Sync settings</a></div>`;
+    return;
+  }
   const last = S.sync.lastUsed; const fresh = last && (Date.now() - new Date(last)) < 36*3600e3;
   const days = Object.keys(S.activity).filter(d => S.activity[d]?.s != null).sort();
   $("#syncCard").innerHTML = !S.sync.keys.length
@@ -1475,7 +1488,7 @@ async function loadHourly(d){
     if (error) throw error;
     const bySrc = {};
     for (const x of data) { if (String(x.ts).slice(11, 19) === "00:00:00") continue; const h = parseInt(String(x.ts).slice(11, 13), 10); if (isNaN(h)) continue; (bySrc[x.src] ||= Array(24).fill(0))[h] += Number(x.v); }
-    const arrs = Object.values(bySrc); const merged = Array(24).fill(0).map((_, h) => Math.max(0, ...arrs.map(a => a[h])));
+    const prim = S.settings.primary_source; const arrs = prim && bySrc[prim] ? [bySrc[prim]] : Object.values(bySrc); const merged = Array(24).fill(0).map((_, h) => Math.max(0, ...arrs.map(a => a[h])));
     hourlyCache[d] = arrs.length && merged.filter(v => v > 0).length > 1 ? merged : [];
   } catch (e) { hourlyCache[d] = []; }
   return hourlyCache[d];
@@ -1565,7 +1578,7 @@ function wireCopy(root){ root.querySelectorAll("[data-copy]").forEach(b => b.onc
 async function renderSettings(){
   $("#acctInfo").textContent = S.email ? `Signed in as ${S.email}. Data lives in your Supabase project ${CFG.url.replace(/^https:\/\//, "")}.` : "";
   $("#about").value = S.settings.about || "";
-  loadSources();
+  loadSources(); renderGoogle();
   $("#akeyState").textContent = S.settings.anthropic_key ? `Key saved (…${S.settings.anthropic_key.slice(-4)})` : "No key saved";
   const box = $("#syncSetup");
   if (!S.uid) { box.innerHTML = ""; return; }
@@ -1705,6 +1718,75 @@ async function onSignedIn(session){
   S.uid = session.user.id; S.email = session.user.email;
   $("#gate").hidden = true;
   await loadAll();
+  googleReturn();
+}
+
+/* ================= Fitbit direct (Google Health API via the "google-health" Edge Function) ================= */
+const GL_SRC = "Fitbit (Google)";
+const glFn = async (body) => {
+  const { data, error } = await SB.functions.invoke("google-health", { body });
+  if (error) { let m = error.message; try { const j = await error.context?.json?.(); if (j?.error) m = j.error; } catch (e) {} throw new Error(/Failed to send|not found|404/i.test(m) ? "The google-health Edge Function isn't set up yet (step 3)." : m); }
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+async function loadGoogle(){
+  if (!SB || !S.uid) return null;
+  const { data, error } = await SB.from("google_link").select("connected_at,last_sync,last_error,last_report").maybeSingle();
+  S.gl = error ? { missing: true } : (data || null);
+  return S.gl;
+}
+const glReport = r => r ? Object.entries(r).filter(([k]) => !["days","records"].includes(k)).map(([k, v]) => typeof v === "number" ? `${esc(k)} <b class="mono">${v}</b>` : `${esc(k)} <span style="color:var(--bad)">✕</span>`).join(" · ") : "";
+async function renderGoogle(){
+  const box = $("#glBox"); if (!box) return;
+  const g = await loadGoogle().catch(() => null);
+  if (g?.missing) { box.innerHTML = `<div class="notice">Run <b>11-fitbit-direct.sql</b> in Supabase first (see the setup steps).</div>`; $("#glHint").textContent = "Not set up"; return; }
+  if (!g) {
+    $("#glHint").textContent = "Not connected";
+    box.innerHTML = `<button class="btn primary" id="glConnect" type="button">Connect Fitbit (Google account)</button>`;
+    $("#glConnect").onclick = googleConnect; return;
+  }
+  const fresh = g.last_sync && Date.now() - new Date(g.last_sync) < 45 * 60e3;
+  $("#glHint").textContent = g.last_sync ? `Last sync ${ago(g.last_sync)}` : "Connected";
+  const errs = g.last_report ? Object.entries(g.last_report).filter(([, v]) => typeof v === "string") : [];
+  box.innerHTML = `<div><span class="sync-dot" style="background:${g.last_error ? "var(--bad)" : fresh ? "var(--ok)" : "var(--warn)"}"></span><b>${g.last_error ? "Sync problem" : "Connected"}</b>
+      <span class="small muted"> · since ${fmtD(String(g.connected_at).slice(0, 10))}${g.last_report?.records != null ? ` · ${g.last_report.records} records in the last run` : ""}</span></div>
+    ${g.last_error ? `<div class="notice" style="margin-top:8px;background:var(--bad-bg)">${esc(g.last_error)}</div>` : ""}
+    ${g.last_report ? `<div class="small" style="margin-top:8px">${glReport(g.last_report)}</div>` : ""}
+    ${errs.length ? `<details class="small" style="margin-top:6px"><summary>Details for ✕</summary>${errs.map(([k, v]) => `<div class="mono" style="word-break:break-all">${esc(k)}: ${esc(v)}</div>`).join("")}</details>` : ""}
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="glSync" type="button">Sync now</button><button class="btn" id="glRe" type="button">Reconnect</button><button class="btn" id="glOff" type="button">Disconnect</button></div>`;
+  $("#glSync").onclick = async () => { const b = $("#glSync"); b.disabled = true; toastMsg("#glMsg", "Fetching from Google…");
+    try { const r = await glFn({ action: "sync", days: 3 }); toastMsg("#glMsg", `Done: ${r.records} records.`); await loadAll(); } catch (e) { toastMsg("#glMsg", esc(e.message), true); } finally { b.disabled = false; renderGoogle(); } };
+  $("#glRe").onclick = googleConnect;
+  $("#glOff").onclick = async () => { if (!confirm("Disconnect Fitbit? Data already saved stays.")) return;
+    try { await glFn({ action: "disconnect" }); toastMsg("#glMsg", "Disconnected. Primary device reset to “Combine all devices”."); await loadAll(); } catch (e) { toastMsg("#glMsg", esc(e.message), true); } renderGoogle(); };
+}
+async function googleConnect(){
+  toastMsg("#glMsg", "Opening Google…");
+  try {
+    const c = await glFn({ action: "config" });
+    if (!c.ready) throw new Error("Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET as Edge Function secrets first (step 4).");
+    const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { sessionStorage.setItem("gl-state", state); } catch (e) {}
+    const q = new URLSearchParams({ client_id: c.clientId, redirect_uri: location.origin + location.pathname, response_type: "code", access_type: "offline", prompt: "consent", include_granted_scopes: "true", scope: c.scopes, state });
+    location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + q;
+  } catch (e) { toastMsg("#glMsg", esc(e.message), true); }
+}
+async function googleReturn(){
+  const p = new URLSearchParams(location.search);
+  if (!p.has("code") && !p.has("error")) return;
+  const code = p.get("code"), state = p.get("state"), err = p.get("error");
+  history.replaceState(null, "", location.pathname + "#settings");
+  go("settings");
+  let saved = null; try { saved = sessionStorage.getItem("gl-state"); sessionStorage.removeItem("gl-state"); } catch (e) {}
+  if (err) { toastMsg("#glMsg", "Google sign-in was cancelled (" + esc(err) + ").", true); return; }
+  if (saved && saved !== state) { toastMsg("#glMsg", "That sign-in didn't come from this page. Tap Connect again.", true); return; }
+  toastMsg("#glMsg", "Connected to Google. Fetching the last 30 days of Fitbit data (about a minute)…");
+  try {
+    const r = await glFn({ action: "exchange", code, redirect_uri: location.origin + location.pathname, tz: -new Date().getTimezoneOffset() });
+    toastMsg("#glMsg", `Fitbit connected: ${r.records} records from the last ${r.days} days. It's now your primary device.`);
+    await loadAll();
+  } catch (e) { toastMsg("#glMsg", "Couldn't finish connecting: " + esc(e.message), true); }
+  renderGoogle();
 }
 
 
