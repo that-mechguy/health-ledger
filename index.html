@@ -387,7 +387,7 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
       <div class="small muted" id="actNote" style="margin-top:6px"></div>
     </div>
     <div class="card">
-      <div class="card-h"><h2>Sleep &amp; heart</h2><span class="hint">Last 90 days, from Apple Health</span></div>
+      <div class="card-h"><h2>Sleep &amp; heart</h2><span class="hint" id="shSrc">Last 90 days, from Apple Health</span></div>
       <div class="stat-row" id="vitStats"></div>
       <div class="grid g2" style="margin-top:16px">
         <div style="min-width:0"><div class="eyebrow">Sleep, hours per night</div><div class="chart" id="sleepChart"></div></div>
@@ -956,6 +956,7 @@ function renderBody(){
 
 /* ---------- render: activity ---------- */
 function renderActivity(){
+  { const el = $("#shSrc"); if (el) el.textContent = "Last 90 days, from " + viaTxt(); }
   renderSyncCard(); renderToday(); renderVitals();
   document.querySelectorAll("#actRange button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.r === S.actRange)));
   const w = activityWindow(S.actRange);
@@ -973,7 +974,7 @@ function renderActivity(){
     tile("Days at 10k+", `${hit}`, have.length ? `${Math.round(hit/have.length*100)}% of logged days` : "") +
     tile("Best day", best ? best.s.toLocaleString("en-IN") : "—", best ? fmtD(best.d) : "") +
     tile("Current 10k streak", `${streak} day${streak === 1 ? "" : "s"}`, "Consecutive days ≥ 10,000") +
-    (kc.length ? tile("Active energy", Math.round(kc.reduce((a,x) => a + x.k, 0)/kc.length).toLocaleString("en-IN") + " <small>kcal/day</small>", "Average, from Apple Health") : "");
+    (kc.length ? tile("Active energy", Math.round(kc.reduce((a,x) => a + x.k, 0)/kc.length).toLocaleString("en-IN") + " <small>kcal/day</small>", "Average, from " + esc(viaTxt())) : "");
   if (S.actRange <= 90) barChart($("#stepChart"), w.list.map(x => ({d:x.d, v:x.s})), {goal:10000, unit:"steps", aria:"Daily steps", xl: x => { const d = pd(x.d); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; }, tl: x => fmtD(x.d)});
   else { // weekly bars for a year
     const wk = []; for (let i = 0; i < w.list.length; i += 7) { const sl = w.list.slice(i, i+7).filter(x => x.s != null); wk.push({d:w.list[i].d, v: sl.length ? sl.reduce((a,x) => a + x.s, 0)/sl.length : null}); }
@@ -1450,13 +1451,15 @@ async function saveReview(){
 
 /* ---- activity: sync card + sleep & heart ---- */
 const ago = iso => { if (!iso) return "never"; const m = (Date.now() - new Date(iso).getTime()) / 60000; if (m < 2) return "just now"; if (m < 60) return Math.round(m) + " min ago"; if (m < 48*60) return Math.round(m/60) + " h ago"; return Math.round(m/1440) + " days ago"; };
+const mainSrc = () => S.settings?.primary_source || "";
+const viaTxt = () => mainSrc() ? `${mainSrc()} (via Apple Health)` : "Apple Health";
 function renderSyncCard(){
   const last = S.sync.lastUsed; const fresh = last && (Date.now() - new Date(last)) < 36*3600e3;
   const days = Object.keys(S.activity).filter(d => S.activity[d]?.s != null).sort();
   $("#syncCard").innerHTML = !S.sync.keys.length
     ? `<div class="row" style="justify-content:space-between"><div><span class="sync-dot" style="background:var(--muted)"></span><b>Apple Health isn't connected yet.</b><div class="small muted">Set up Health Auto Export once and your steps, sleep, heart rate and weight arrive on their own.</div></div><a class="btn primary" href="#settings">Connect Apple Health</a></div>`
-    : `<div class="row" style="justify-content:space-between"><div><span class="sync-dot" style="background:${fresh ? "var(--ok)" : "var(--warn)"}"></span><b>${fresh ? "Syncing from Apple Health" : last ? "Apple Health sync is behind" : "Waiting for the first sync"}</b>
-        <div class="small muted">Last delivery ${ago(last)}${days.length ? ` · latest day ${fmtD(days[days.length-1])}` : ""}${!fresh && last ? " · open Health Auto Export on your phone to nudge it" : ""}</div></div><a class="btn" href="#settings">Sync settings</a></div>`;
+    : `<div class="row" style="justify-content:space-between"><div><span class="sync-dot" style="background:${fresh ? "var(--ok)" : "var(--warn)"}"></span><b>${fresh ? "Syncing from " + esc(viaTxt()) : last ? "Sync is behind" : "Waiting for the first sync"}</b>
+        <div class="small muted">Last delivery ${ago(last)}${days.length ? ` · latest day ${fmtD(days[days.length-1])}` : ""}${!fresh && last ? " · open Health Auto Export on your phone to nudge it" : ""}${mainSrc() ? `<br>${esc(mainSrc())} is your main device; it reaches the dashboard through Apple Health and Health Auto Export.` : ""}</div></div><a class="btn" href="#settings">Sync settings</a></div>`;
 }
 /* ---- Today panel ---- */
 const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -1543,7 +1546,7 @@ function renderVitals(){
   $("#vitStats").innerHTML =
     tile("Sleep", sl.length ? fmtN(avg(sl), 1) + " <small>h/night</small>" : "—", sl.length ? `7-day: ${fmtN(last7(sl) ?? avg(sl), 1)} h · aim for 7–9` : "No sleep data yet") +
     tile("Resting heart rate", hr.length ? fmtN(avg(hr), 0) + " <small>bpm</small>" : "—", hr.length ? `7-day: ${fmtN(last7(hr) ?? avg(hr), 0)} bpm · lower is fitter` : "No data yet") +
-    tile("HRV", hv.length ? fmtN(avg(hv), 0) + " <small>ms</small>" : "—", hv.length ? `7-day: ${fmtN(last7(hv) ?? avg(hv), 0)} ms · higher is better` : "Needs Apple Watch") +
+    tile("HRV", hv.length ? fmtN(avg(hv), 0) + " <small>ms</small>" : "—", hv.length ? `7-day: ${fmtN(last7(hv) ?? avg(hv), 0)} ms · higher is better` : "Needs a watch or band that records HRV") +
     tile("Weight (Health)", wt.length ? fmtN(wt[wt.length-1].y, 1) + " <small>kg</small>" : "—", wt.length ? `Logged ${fmtD(wt[wt.length-1].x)}` : "No weigh-ins logged") +
     tile("Blood pressure", bs.length ? `${fmtN(avg(bs), 0)}/${fmtN(avg(bd), 0)} <small>mmHg avg</small>` : "—", bs.length ? `${bs.length} day${bs.length > 1 ? "s" : ""} with readings` : "No readings yet") +
     tile("Blood oxygen", ox.length ? fmtN(avg(ox), 0) + " <small>% avg</small>" : "—", ox.length ? "Normal is 95–100%" : "No readings yet");
