@@ -502,7 +502,7 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
     </div>
     <div class="card" id="glCard">
       <div class="card-h"><h2>Fitbit, direct from Google</h2><span class="hint" id="glHint"></span></div>
-      <p class="small" style="margin:0 0 10px">Reads your Fitbit's steps, heart rate, resting heart rate, HRV, blood oxygen, breathing rate and sleep straight from your Google account every 15 minutes, without waiting for Apple Health. Once connected, it becomes your primary device.</p>
+      <p class="small" style="margin:0 0 10px">Reads your Fitbit's steps, heart rate, resting heart rate, HRV, blood oxygen, breathing rate and sleep straight from your Google account every 15 minutes, without waiting for Apple Health, and can send your Daily nutrition log back to Fitbit. Once connected, it becomes your primary device.</p>
       <div id="glBox"><div class="empty small">Loading…</div></div>
       <div class="small" id="glMsg" style="margin-top:6px"></div>
     </div>
@@ -1731,7 +1731,8 @@ const glFn = async (body) => {
 };
 async function loadGoogle(){
   if (!SB || !S.uid) return null;
-  const { data, error } = await SB.from("google_link").select("connected_at,last_sync,last_error,last_report").maybeSingle();
+  let { data, error } = await SB.from("google_link").select("connected_at,last_sync,last_error,last_report,scopes,push_nutrition,last_push").maybeSingle();
+  if (error) { ({ data, error } = await SB.from("google_link").select("connected_at,last_sync,last_error,last_report").maybeSingle()); if (!error && data) data.noPush = true; }
   S.gl = error ? { missing: true } : (data || null);
   return S.gl;
 }
@@ -1753,12 +1754,35 @@ async function renderGoogle(){
     ${g.last_error ? `<div class="notice" style="margin-top:8px;background:var(--bad-bg)">${esc(g.last_error)}</div>` : ""}
     ${g.last_report ? `<div class="small" style="margin-top:8px">${glReport(g.last_report)}</div>` : ""}
     ${errs.length ? `<details class="small" style="margin-top:6px"><summary>Details for ✕</summary>${errs.map(([k, v]) => `<div class="mono" style="word-break:break-all">${esc(k)}: ${esc(v)}</div>`).join("")}</details>` : ""}
-    <div class="row" style="margin-top:10px"><button class="btn primary" id="glSync" type="button">Sync now</button><button class="btn" id="glRe" type="button">Reconnect</button><button class="btn" id="glOff" type="button">Disconnect</button></div>`;
+    <div class="row" style="margin-top:10px"><button class="btn primary" id="glSync" type="button">Sync now</button><button class="btn" id="glRe" type="button">Reconnect</button><button class="btn" id="glOff" type="button">Disconnect</button></div>
+    <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px" id="glPush">${glPushHTML(g)}</div>`;
+  wireGlPush(g);
   $("#glSync").onclick = async () => { const b = $("#glSync"); b.disabled = true; toastMsg("#glMsg", "Fetching from Google…");
     try { const r = await glFn({ action: "sync", days: 3 }); toastMsg("#glMsg", `Done: ${r.records} records.`); await loadAll(); } catch (e) { toastMsg("#glMsg", esc(e.message), true); } finally { b.disabled = false; renderGoogle(); } };
   $("#glRe").onclick = googleConnect;
   $("#glOff").onclick = async () => { if (!confirm("Disconnect Fitbit? Data already saved stays.")) return;
     try { await glFn({ action: "disconnect" }); toastMsg("#glMsg", "Disconnected. Primary device reset to “Combine all devices”."); await loadAll(); } catch (e) { toastMsg("#glMsg", esc(e.message), true); } renderGoogle(); };
+}
+function glPushHTML(g){
+  const head = `<div class="eyebrow" style="margin-bottom:6px">Food &amp; water → Fitbit</div>`;
+  if (g.noPush) return head + `<div class="small">Run <b>13-fitbit-nutrition.sql</b> in Supabase to turn this on.</div>`;
+  if (!String(g.scopes || "").includes("nutrition.writeonly")) return head + `<div class="small">Sends what you log in Daily nutrition (calories, protein, carbs, fat, sodium and water) to your Google / Fitbit account. Tap <b>Reconnect</b> above and allow the nutrition permission to start.</div>`;
+  const lp = g.last_push;
+  const res = lp ? (lp.error ? `<span style="color:var(--bad)">${esc(lp.error)}</span>` : `Last send ${ago(lp.at)}: ${lp.sent} new, ${lp.updated} updated, ${lp.removed} removed, water ${lp.water} day${lp.water === 1 ? "" : "s"}${lp.errors?.length ? ` · <span style="color:var(--bad)">${lp.errors.length} failed</span>` : ""}`) : "Nothing sent yet.";
+  return head + `<div class="small" style="margin-bottom:8px">${res}</div>
+    ${lp?.errors?.length ? `<details class="small" style="margin-bottom:8px"><summary>Failures</summary>${lp.errors.map(e => `<div class="mono" style="word-break:break-all">${esc(e)}</div>`).join("")}</details>` : ""}
+    <div class="row"><button class="btn" id="glPushToday" type="button">Send today's food now</button><button class="btn" id="glPushWeek" type="button">Send last 7 days</button>
+      <label class="row small" style="gap:6px;cursor:pointer"><input type="checkbox" id="glAuto" ${g.push_nutrition ? "checked" : ""}> Send automatically (every 15 min)</label></div>
+    <div class="small muted" style="margin-top:6px">Edits and deletions in the last 3 days are sent too. Check the first meal in the Fitbit app before turning on automatic sending.</div>`;
+}
+function wireGlPush(g){
+  const send = async (days, btn) => { btn.disabled = true; toastMsg("#glMsg", "Sending to Google…");
+    try { const r = await glFn({ action: "push", days }); toastMsg("#glMsg", r.error ? esc(r.error) : `Sent ${r.sent} new, ${r.updated} updated, ${r.removed} removed${r.water ? `, water for ${r.water} day${r.water > 1 ? "s" : ""}` : ""}.${r.errors?.length ? " Some failed; see below." : ""}`, !!(r.error || r.errors?.length)); }
+    catch (e) { toastMsg("#glMsg", esc(e.message), true); } finally { btn.disabled = false; renderGoogle(); } };
+  const t = $("#glPushToday"), w = $("#glPushWeek"), a = $("#glAuto");
+  if (t) t.onclick = () => send(1, t);
+  if (w) w.onclick = () => send(7, w);
+  if (a) a.onchange = async () => { try { await glFn({ action: "auto", on: a.checked }); toastMsg("#glMsg", a.checked ? "Food and water will be sent every 15 minutes." : "Automatic sending is off."); } catch (e) { a.checked = !a.checked; toastMsg("#glMsg", esc(e.message), true); } };
 }
 async function googleConnect(){
   toastMsg("#glMsg", "Opening Google…");
