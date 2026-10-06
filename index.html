@@ -279,6 +279,7 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
     <nav class="tabs" role="tablist" id="tabs">
       <button class="tab" role="tab" data-tab="overview" aria-selected="true">Overview</button>
       <button class="tab" role="tab" data-tab="activity" aria-selected="false">Activity</button>
+      <button class="tab" role="tab" data-tab="nutrition" aria-selected="false">Daily nutrition</button>
       <button class="tab" role="tab" data-tab="readiness" aria-selected="false">Readiness</button>
       <button class="tab" role="tab" data-tab="results" aria-selected="false">Latest results</button>
       <button class="tab" role="tab" data-tab="body" aria-selected="false">Body scan</button>
@@ -425,6 +426,9 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
       </div>
     </div>
   </section>
+
+  <!-- DAILY NUTRITION (built by nutrition.js) -->
+  <section class="view" id="v-nutrition" hidden></section>
 
   <!-- READINESS -->
   <section class="view" id="v-readiness" hidden>
@@ -993,7 +997,7 @@ function go(tab, anchor){
   S.tab = tab;
   document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === tab)));
   document.querySelectorAll("section.view").forEach(s => s.hidden = s.id !== "v-" + tab);
-  if (tab === "history") renderHistory(); if (tab === "body") renderBody(); if (tab === "activity") renderActivity(); if (tab === "readiness") renderReadiness(); if (tab === "settings") renderSettings();
+  if (tab === "history") renderHistory(); if (tab === "body") renderBody(); if (tab === "activity") renderActivity(); if (tab === "readiness") renderReadiness(); if (tab === "settings") renderSettings(); if (tab === "nutrition") window.NUT?.render();
   try { localStorage.setItem("hl-tab", tab); } catch(e) {}
   if (anchor) { const el = document.getElementById("cat-" + anchor); if (el) setTimeout(() => el.scrollIntoView({behavior:"smooth", block:"start"}), 30); }
   else window.scrollTo({top:0});
@@ -1238,6 +1242,7 @@ async function loadAll(){
     S.loadedR = S.loadedA = true;
     notice("");
     renderAll();
+    window.NUT?.load();
   } catch (e) {
     notice("Couldn't load your data: " + esc(e.message || e.code || e) + ". Check your connection and tap refresh.");
   } finally { loading = false; btn?.classList.remove("spin"); }
@@ -2298,11 +2303,13 @@ renderAll();
   if (!window.supabase || !window.supabase.createClient) { notice("Couldn't load the Supabase library. Check your internet connection and reload."); return; }
   if (!CFG.url || !CFG.key) { showGate("cfg"); return; }
   SB = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "hl-auth" } });
-  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { S.uid = null; S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
+  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { window.NUT?.reset(); S.uid = null; S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
   const { data: { session } } = await SB.auth.getSession();
   if (!session) showGate("login"); else await onSignedIn(session);
 })();
 
 </script>
+<script src="foods.js"></script>
+<script src="nutrition.js"></script>
 </body>
 </html>
