@@ -1766,23 +1766,38 @@ async function renderGoogle(){
 function glPushHTML(g){
   const head = `<div class="eyebrow" style="margin-bottom:6px">Food &amp; water → Fitbit</div>`;
   if (g.noPush) return head + `<div class="small">Run <b>13-fitbit-nutrition.sql</b> in Supabase to turn this on.</div>`;
-  if (!String(g.scopes || "").includes("nutrition.writeonly")) return head + `<div class="small">Sends what you log in Daily nutrition (calories, protein, carbs, fat, sodium and water) to your Google / Fitbit account. Tap <b>Reconnect</b> above and allow the nutrition permission to start.</div>`;
   const lp = g.last_push;
   const res = lp ? (lp.error ? `<span style="color:var(--bad)">${esc(lp.error)}</span>` : `Last send ${ago(lp.at)}: ${lp.sent} new, ${lp.updated} updated, ${lp.removed} removed, water ${lp.water} day${lp.water === 1 ? "" : "s"}${lp.errors?.length ? ` · <span style="color:var(--bad)">${lp.errors.length} failed</span>` : ""}`) : "Nothing sent yet.";
   return head + `<div class="small" style="margin-bottom:8px">${res}</div>
     ${lp?.errors?.length ? `<details class="small" style="margin-bottom:8px"><summary>Failures</summary>${lp.errors.map(e => `<div class="mono" style="word-break:break-all">${esc(e)}</div>`).join("")}</details>` : ""}
-    <div class="row"><button class="btn" id="glPushToday" type="button">Send today's food now</button><button class="btn" id="glPushWeek" type="button">Send last 7 days</button>
+    <div class="row"><button class="btn" id="glPushToday" type="button">Send today's food now</button><button class="btn" id="glPushAll" type="button">Send all saved entries</button>
       <label class="row small" style="gap:6px;cursor:pointer"><input type="checkbox" id="glAuto" ${g.push_nutrition ? "checked" : ""}> Send automatically (every 15 min)</label></div>
-    <div class="small muted" style="margin-top:6px">Edits and deletions in the last 3 days are sent too. Check the first meal in the Fitbit app before turning on automatic sending.</div>`;
+    <div class="small muted" style="margin-top:6px">“Send all saved entries” sends your whole food diary once; entries already sent are skipped. Automatic sending covers new entries plus edits and deletions from the last 3 days. Check the first meal in the Fitbit app before turning on automatic sending.</div>`;
 }
 function wireGlPush(g){
-  const send = async (days, btn) => { btn.disabled = true; toastMsg("#glMsg", "Sending to Google…");
-    try { const r = await glFn({ action: "push", days }); toastMsg("#glMsg", r.error ? esc(r.error) : `Sent ${r.sent} new, ${r.updated} updated, ${r.removed} removed${r.water ? `, water for ${r.water} day${r.water > 1 ? "s" : ""}` : ""}.${r.errors?.length ? " Some failed; see below." : ""}`, !!(r.error || r.errors?.length)); }
-    catch (e) { toastMsg("#glMsg", esc(e.message), true); } finally { btn.disabled = false; renderGoogle(); } };
-  const t = $("#glPushToday"), w = $("#glPushWeek"), a = $("#glAuto");
-  if (t) t.onclick = () => send(1, t);
-  if (w) w.onclick = () => send(7, w);
-  if (a) a.onchange = async () => { try { await glFn({ action: "auto", on: a.checked }); toastMsg("#glMsg", a.checked ? "Food and water will be sent every 15 minutes." : "Automatic sending is off."); } catch (e) { a.checked = !a.checked; toastMsg("#glMsg", esc(e.message), true); } };
+  // sends in batches (the server does up to 120 writes per call) until everything in the range is in Google
+  const sendAll = async (days, btn) => {
+    if (btn) btn.disabled = true;
+    const tot = { sent: 0, updated: 0, removed: 0, water: 0, errors: [] };
+    try {
+      for (let i = 0; i < 40; i++) {
+        toastMsg("#glMsg", `Sending to Google… ${tot.sent + tot.updated} entries so far`);
+        const r = await glFn({ action: "push", days });
+        if (r.error) throw new Error(r.error);
+        for (const k of ["sent", "updated", "removed", "water"]) tot[k] += r[k] || 0;
+        tot.errors.push(...(r.errors || []));
+        if (!r.more || r.errors?.length) break;
+      }
+      toastMsg("#glMsg", `Done: ${tot.sent} new, ${tot.updated} updated, ${tot.removed} removed${tot.water ? `, water for ${tot.water} day${tot.water > 1 ? "s" : ""}` : ""}.${tot.errors.length ? " Some failed; see below." : ""}`, tot.errors.length > 0);
+    } catch (e) { toastMsg("#glMsg", esc(e.message), true); }
+    finally { if (btn) btn.disabled = false; renderGoogle(); }
+  };
+  const t = $("#glPushToday"), w = $("#glPushAll"), a = $("#glAuto");
+  if (t) t.onclick = () => sendAll(1, t);
+  if (w) w.onclick = () => sendAll(3660, w);
+  if (a) a.onchange = async () => { try { await glFn({ action: "auto", on: a.checked });
+      if (a.checked) { toastMsg("#glMsg", "Automatic sending is on. Sending everything saved so far…"); await sendAll(3660, null); toastMsg("#glMsg", "Automatic sending is on: everything saved so far is in Google, and new entries go every 15 minutes."); }
+      else toastMsg("#glMsg", "Automatic sending is off."); } catch (e) { a.checked = !a.checked; toastMsg("#glMsg", esc(e.message), true); } };
 }
 async function googleConnect(){
   toastMsg("#glMsg", "Opening Google…");
