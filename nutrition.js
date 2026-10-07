@@ -115,6 +115,16 @@ css.textContent = `
 .nu-item .n{cursor:pointer}
 .nu-x:hover{color:var(--bad);background:var(--bad-bg)}
 .nu-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.nu-mis{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 22px}
+.nu-mi{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;padding:8px 0;border-top:1px solid var(--grid)}
+.nu-mi:hover .n,.nu-mi:focus-visible .n{color:var(--accent)}
+.nu-mi .n{font-weight:600;font-size:.88rem}
+.nu-mi .v{font-family:var(--f-mono);font-size:.84rem;text-align:right}
+.nu-mi .v small{color:var(--muted);font-size:.72rem}
+.nu-mi .bar{grid-column:1/-1;height:5px;border-radius:9px;background:var(--line);overflow:hidden;display:block}
+.nu-mi .bar i{display:block;height:100%;border-radius:9px}
+.nu-mi .s{grid-column:1/-1;font-size:.74rem;color:var(--muted)}
+.nu-kid{display:inline-block;font-size:.62rem;font-weight:700;color:var(--info);background:var(--info-bg);border-radius:4px;padding:0 4px;vertical-align:1px}
 .nu-meter{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
 .nu-meter:first-child{border-top:0;padding-top:0}
 .nu-meter .mid{flex:1;min-width:0}
@@ -239,6 +249,9 @@ root.innerHTML = `
       <div class="card"><div class="card-h"><h2>Last 7 days</h2><span class="hint" id="nuHistHint"></span></div><div class="nu-chart" id="nuChart"></div>
         <div class="row small muted" style="margin-top:6px"><span><i class="nu-dot" style="background:var(--accent)"></i> Within goal</span><span><i class="nu-dot" style="background:var(--bad)"></i> Over</span><span>- - Goal</span></div></div>
     </div>
+    <div class="card"><div class="card-h"><div><h2>Micronutrients</h2><div class="small muted" id="nuMiHint"></div></div>
+      <div class="row"><button class="pill-btn" data-miv="day" aria-pressed="true">Day</button><button class="pill-btn" data-miv="week" aria-pressed="false">7-day average</button></div></div>
+      <div id="nuMicro"></div></div>
   </div>
 
   <div id="nuSupp" hidden>
@@ -310,10 +323,14 @@ async function addEntries(list){
   const { error } = await sb().from("food_entries").insert(rows);
   if (error) { toast("Couldn't save: " + error.message); throw error; }
   N.entries.push(...rows.map(rowToEntry)); NU.render();
+  const fresh = N.entries.filter(e => rows.some(r => r.id === e.id) && e.meal !== "supplements" && !(e.micros || []).length);
+  if (fresh.length && S.settings?.anthropic_key) setTimeout(() => estimateMicros(fresh, false), 50);
   return rows.map(rowToEntry);
 }
 async function updateEntry(id, patch){
   const row = { name: patch.name, serving: patch.serving, kcal: r0(patch.kcal), protein_g: r1(patch.p), carbs_g: r1(patch.c), fat_g: r1(patch.f), sodium_mg: patch.na == null || patch.na === "" ? null : r0(patch.na), meal: patch.meal, day: patch.date };
+  const was = N.entries.find(x => x.id === id);
+  if (was?.micros?.length && was.kcal > 0 && r0(patch.kcal) !== r0(was.kcal)) { const k = patch.kcal / was.kcal; row.micros = patch.micros = was.micros.map(m => ({ ...m, amt: Math.round(m.amt * k * 1000) / 1000 })); }
   const { error } = await sb().from("food_entries").update(row).eq("id", id);
   if (error) { toast("Couldn't save: " + error.message); throw error; }
   const i = N.entries.findIndex(x => x.id === id); if (i >= 0) N.entries[i] = { ...N.entries[i], ...patch }; NU.render();
@@ -457,7 +474,7 @@ NU.render = function(){
   q("#nuNaF").style.width = Math.min(100, naF * 100) + "%"; q("#nuNaF").style.background = naF > 1 ? "var(--bad)" : naF > .8 ? "var(--warn)" : "var(--sodium)";
   q("#nuNaL").innerHTML = naF > 1 ? chipH("out", `${nf(t.na - naT)} mg over`) : naF > .8 ? chipH("border", `${nf(naT - t.na)} mg left`) : `${nf(naT - t.na)} mg left`;
   q("#nuNaNote").textContent = t.naMissing ? `${t.naMissing} item${t.naMissing > 1 ? "s" : ""} without sodium data` : "";
-  renderChart(); renderDiary(); renderSupp();
+  renderChart(); renderDiary(); renderSupp(); renderMicros();
 };
 
 function renderChart(){
@@ -948,6 +965,191 @@ function openPlan(){
     try { await savePlan(o); toast("Targets saved"); bg.close(); } catch {} };
   bg.querySelector("#plUse")?.addEventListener("click", async () => { try { await savePlan(next); toast("Plan updated from your latest weight"); bg.close(); } catch {} });
 }
+
+/* ---------- micronutrients: targets, totals (food estimates + supplement labels), card + details ---------- */
+// Targets: ICMR-NIN 2020 RDAs (adult man, moderate activity) where published; otherwise NIH / National Academies DRIs (men 19–30).
+// "ul" = tolerable upper intake (National Academies); "ulSupp" = that limit applies to supplements/fortified only; "cap" = a softer personal limit for one underdeveloped kidney.
+const MI = [
+  // vitamins
+  { k: "vitA", n: "Vitamin A", u: "µg", t: 1000, ul: 3000, g: "Vitamins", re: /vitamin a\b|retinol|beta.?carotene/, iu: .3,
+    why: "Vision, skin, immunity.", src: "Carrots, sweet potato, spinach, pumpkin, mango, milk, curd.", note: "The upper limit is for preformed vitamin A (supplements, liver); carotenes from vegetables are safe." },
+  { k: "vitD", n: "Vitamin D", u: "µg", t: 15, ul: 100, g: "Vitamins", re: /vitamin d|cholecalciferol|ergocalciferol|\bd3\b/, iu: 1 / 40,
+    why: "Calcium absorption, bones, muscles, immunity, testosterone.", src: "Sunlight (15–20 min midday), fortified milk, mushrooms in sun, egg yolk; usually needs a supplement.",
+    note: "Target 15 µg = 600 IU (ICMR). With your low levels a doctor-guided supplement is normal; doses above 2,000 IU a day should be agreed with your nephrologist because of the single kidney." },
+  { k: "vitE", n: "Vitamin E", u: "mg", t: 15, ul: 1000, ulSupp: 1, g: "Vitamins", re: /vitamin e\b|tocopherol/, iu: .67, why: "Antioxidant; protects cells.", src: "Almonds, sunflower seeds, peanuts, vegetable oils, spinach." },
+  { k: "vitK", n: "Vitamin K", u: "µg", t: 120, g: "Vitamins", re: /vitamin k|phylloquinone|menaquinone|mk-?7/, why: "Blood clotting, bone health.", src: "Spinach, methi, broccoli, cabbage, soybeans." },
+  { k: "vitC", n: "Vitamin C", u: "mg", t: 80, ul: 2000, cap: 1000, g: "Vitamins", re: /vitamin c|ascorbic/, why: "Immunity, collagen; improves iron absorption from plant foods.", src: "Amla, guava, citrus, capsicum, tomato, sprouts.",
+    note: "Kidney: keep supplements under 500 mg a day; high doses raise oxalate and kidney-stone risk." },
+  { k: "b1", n: "Thiamine (B1)", u: "mg", t: 1.8, g: "Vitamins", re: /thiamin|vitamin b1\b|\bb1\b/, why: "Turns carbs into energy; nerves.", src: "Whole grains, dal, peanuts, sunflower seeds." },
+  { k: "b2", n: "Riboflavin (B2)", u: "mg", t: 2.5, g: "Vitamins", re: /riboflavin|vitamin b2\b|\bb2\b/, why: "Energy metabolism; eyes and skin.", src: "Milk, curd, paneer, eggs, almonds, mushrooms." },
+  { k: "b3", n: "Niacin (B3)", u: "mg", t: 18, ul: 35, ulSupp: 1, g: "Vitamins", re: /niacin|nicotin|vitamin b3\b|\bb3\b/, why: "Energy metabolism; skin and nerves.", src: "Peanuts, whole grains, mushrooms, green peas.", note: "The limit is for supplements; food niacin is safe." },
+  { k: "b5", n: "Pantothenic acid (B5)", u: "mg", t: 5, g: "Vitamins", re: /pantothen|vitamin b5\b|\bb5\b/, why: "Energy and hormone production.", src: "Mushrooms, avocado, milk, sweet potato, whole grains." },
+  { k: "b6", n: "Vitamin B6", u: "mg", t: 2.4, ul: 100, g: "Vitamins", re: /pyridox|vitamin b6\b|\bb6\b/, why: "Protein metabolism, mood, red blood cells; lowers homocysteine.", src: "Chickpeas, banana, potato, peanuts, soy." },
+  { k: "b7", n: "Biotin (B7)", u: "µg", t: 30, g: "Vitamins", re: /biotin|vitamin b7|vitamin h\b/, why: "Fat and carb metabolism; hair and nails.", src: "Eggs, peanuts, almonds, sweet potato." },
+  { k: "b9", n: "Folate (B9)", u: "µg", t: 400, ul: 1000, ulSupp: 1, g: "Vitamins", re: /folate|folic|vitamin b9|methylfolate/, folic: 1.7,
+    why: "DNA and red blood cells; with B12 it clears homocysteine.", src: "Dal, rajma, chana, spinach, methi, broccoli, oranges.",
+    note: "ICMR sets 300 µg; 400 µg is used here because your homocysteine was high. The limit applies to folic acid from supplements." },
+  { k: "b12", n: "Vitamin B12", u: "µg", t: 2.4, g: "Vitamins", re: /b12|cobalamin/, why: "Nerves, red blood cells, energy; with folate it clears homocysteine.", src: "Milk, curd, paneer, eggs, fortified foods. Plant foods have almost none, so vegetarians often need a supplement.",
+    note: "Daily need is small, but with low blood B12 your doctor may prescribe much more for a while. Very high doses are considered safe." },
+  { k: "choline", n: "Choline", u: "mg", t: 550, ul: 3500, g: "Vitamins", re: /choline/, why: "Liver fat processing, brain and muscle.", src: "Eggs, soybeans, paneer, peanuts, broccoli." },
+  // minerals
+  { k: "ca", n: "Calcium", u: "mg", t: 1000, ul: 2500, cap: 2000, g: "Minerals", re: /calcium/, why: "Bones, muscles, nerves.", src: "Milk, curd, paneer, ragi, sesame, tofu, green leafy vegetables.",
+    note: "Kidney: get most of it from food; high-dose calcium supplements can raise kidney-stone risk." },
+  { k: "p", n: "Phosphorus", u: "mg", t: 1000, ul: 4000, cap: 1400, g: "Minerals", re: /phosph/, why: "Bones, energy (ATP).", src: "Dal, dairy, nuts, whole grains.",
+    note: "Kidney: no need to restrict with normal kidney function, but avoid phosphate additives (colas, processed cheese, packaged meats) and phosphorus supplements." },
+  { k: "mg", n: "Magnesium", u: "mg", t: 440, ul: 350, ulSupp: 1, g: "Minerals", re: /magnes/, why: "Muscle and nerve function, sleep, blood sugar.", src: "Pumpkin seeds, almonds, cashews, dark leafy greens, whole grains, dal.",
+    note: "The 350 mg limit is for supplements only. Kidney: check magnesium supplements with your doctor (the kidneys clear excess magnesium)." },
+  { k: "k", n: "Potassium", u: "mg", t: 3400, g: "Minerals", re: /potassium/, why: "Blood pressure, heart rhythm, muscles.", src: "Banana, coconut water, potatoes, dal, curd, tomatoes, spinach.",
+    note: "Kidney: food potassium is helpful while kidney function is normal. Avoid potassium supplements and salt substitutes (KCl) unless your doctor agrees." },
+  { k: "fe", n: "Iron", u: "mg", t: 19, ul: 45, g: "Minerals", re: /\biron\b|ferrous|ferric/, why: "Carries oxygen in blood; energy.", src: "Dal, rajma, chana, spinach, jaggery, dates, fortified cereals. Pair with vitamin C; avoid tea with meals." },
+  { k: "zn", n: "Zinc", u: "mg", t: 17, ul: 40, g: "Minerals", re: /zinc/, why: "Immunity, wound healing, testosterone.", src: "Pumpkin seeds, chickpeas, cashews, paneer, whole grains." },
+  { k: "cu", n: "Copper", u: "mg", t: .9, ul: 10, g: "Minerals", re: /copper/, why: "Iron use, nerves, connective tissue.", src: "Cashews, sesame, chickpeas, whole grains." },
+  { k: "mn", n: "Manganese", u: "mg", t: 2.3, ul: 11, g: "Minerals", re: /manganese/, why: "Bone formation, metabolism.", src: "Whole grains, nuts, tea, leafy greens." },
+  { k: "se", n: "Selenium", u: "µg", t: 55, ul: 400, g: "Minerals", re: /selenium/, why: "Thyroid, antioxidant, sperm health.", src: "Brazil nuts (1–2 is plenty), sunflower seeds, whole grains, eggs, mushrooms." },
+  { k: "i", n: "Iodine", u: "µg", t: 150, ul: 1100, g: "Minerals", re: /iodine|iodide/, why: "Thyroid hormones.", src: "Iodised salt, milk, curd." },
+  { k: "cl", n: "Chloride", u: "mg", t: 2300, ul: 3600, g: "Minerals", re: /chlorid/, why: "Fluid balance and stomach acid; comes mostly with salt (sodium chloride).", src: "Table salt, pickles, papad, packaged snacks; tracks closely with your sodium.", note: "If chloride is high, your salt intake is high: the sodium limit is the one to watch." },
+  { k: "cr", n: "Chromium", u: "µg", t: 35, g: "Minerals", re: /chromium/, why: "Insulin action.", src: "Broccoli, whole grains, potatoes." },
+  { k: "mo", n: "Molybdenum", u: "µg", t: 45, ul: 2000, g: "Minerals", re: /molybden/, why: "Enzyme function (including uric acid breakdown).", src: "Dal, beans, whole grains, nuts." },
+  // other
+  { k: "fibre", n: "Fibre", u: "g", t: 30, g: "Other", re: /fib(re|er)/, why: "Gut health, cholesterol, blood sugar, fullness.", src: "Dal, rajma, chana, whole grains, oats, fruit, vegetables, seeds." },
+  { k: "omega3", n: "Omega-3 (ALA/EPA/DHA)", u: "mg", t: 1600, g: "Other", re: /omega.?3|\bepa\b|\bdha\b|fish oil|\bala\b|linolenic/, why: "Heart, triglycerides, brain.", src: "Flaxseed, chia, walnuts, mustard/soybean oil; algae oil for EPA/DHA.", note: "Target 1.6 g ALA (plant omega-3) for men; EPA/DHA from supplements counts too." },
+  { k: "satfat", n: "Saturated fat", u: "g", lim: 18, g: "Limits", re: /saturated/, why: "Raises LDL cholesterol.", src: "Ghee, butter, cream, cheese, coconut oil, fried and bakery foods.", note: "Kept under ~7% of calories because of your LDL." },
+  { k: "sugar", n: "Added sugar", u: "g", lim: 25, g: "Limits", re: /added sugar|^sugars?$/, why: "Raises triglycerides, liver fat and uric acid.", src: "Sweets, sugar in tea/coffee, juices, soft drinks, biscuits.", note: "Fructose (sugary drinks, juice) also raises uric acid." },
+  { k: "chol", n: "Cholesterol", u: "mg", lim: 300, g: "Limits", re: /cholesterol/, why: "Dietary cholesterol matters less than saturated fat, but keep moderate.", src: "Egg yolk, ghee, butter, cheese." },
+  { k: "caffeine", n: "Caffeine", u: "mg", lim: 400, g: "Limits", re: /caffeine/, why: "Up to 400 mg/day is fine for most adults; late caffeine hurts sleep.", src: "Coffee (~80–100 mg/cup), tea (~40 mg), energy drinks, pre-workouts." }
+];
+const MIK = Object.fromEntries(MI.map(x => [x.k, x]));
+const MASS = { g: 1e6, mg: 1e3, "µg": 1, ug: 1, mcg: 1 };
+function microKey(name){ const s = String(name || "").toLowerCase(); for (const m of MI) if (m.re.test(s)) return m; return null; }
+// amount in the catalogue unit, or null if the unit can't be converted
+function microAmt(m, name, amt, unit){
+  const u = String(unit || "").toLowerCase().replace("μ", "µ").replace(/\s+/g, ""); let v = +amt; if (!isFinite(v)) return null;
+  if (u === "iu") return m.iu ? toUnit(v * m.iu, m.k === "vitA" || m.k === "vitD" ? "µg" : "mg", m.u) : null;
+  const base = u.replace(/dfe|rae$/, "");
+  if (!(base in MASS)) return null;
+  let out = toUnit(v, base, m.u);
+  if (m.folic && /folic/i.test(name) && !/dfe/.test(u)) out *= m.folic;
+  return out;
+}
+function toUnit(v, from, to){ const f = MASS[from === "ug" || from === "mcg" ? "µg" : from], t = MASS[to]; return f && t ? v * f / t : null; }
+const fmtMi = (v, u) => v >= 100 ? nf(v) : v >= 10 ? r1(v) : (Math.round(v * 100) / 100);
+
+function microTotals(days){
+  const tot = {}, foodOnly = {}, supp = {}, by = {}; let items = 0, est = 0;
+  for (const d of days) for (const e of dayItems(d)) {
+    const isSupp = e.meal === "supplements"; if (!isSupp) { items++; if ((e.micros || []).length) est++; }
+    for (const x of e.micros || []) {
+      const m = MIK[x.n] || microKey(x.n); if (!m) continue;
+      const v = microAmt(m, x.n, x.amt, x.unit ?? m.u); if (v == null || v <= 0) continue;
+      tot[m.k] = (tot[m.k] || 0) + v; (isSupp ? supp : foodOnly)[m.k] = ((isSupp ? supp : foodOnly)[m.k] || 0) + v;
+      ((by[m.k] ||= {})[e.name] = (by[m.k][e.name] || 0) + v);
+    }
+  }
+  const n = Math.max(1, days.length); for (const o of [tot, foodOnly, supp]) for (const k in o) o[k] /= n;
+  for (const k in by) for (const nm in by[k]) by[k][nm] /= n;
+  return { tot, foodOnly, supp, by, items, est };
+}
+function microStatus(m, r){
+  const v = r.tot[m.k] || 0;
+  if (m.lim != null) { const f = v / m.lim; return f > 1 ? ["out", "Over limit", f] : f > .8 ? ["border", "Near limit", f] : ["ok", "Under limit", f]; }
+  const scoped = m.ulSupp ? (r.supp[m.k] || 0) : v;
+  if (m.ul && scoped > m.ul) return ["out", m.ulSupp ? "Supplements above safe limit" : "Above safe limit", v / m.t];
+  if (m.cap && v > m.cap) return ["border", "Above your kidney-aware limit", v / m.t];
+  const f = v / m.t; return f >= .9 ? ["ok", "Met", f] : f >= .5 ? ["border", "Getting there", f] : ["low", "Low", f];
+}
+function labNote(m){
+  try {
+    if (typeof D === "undefined" || !D?.latest) return "";
+    const L = k => { const e = D.latest[k]; const v = e && typeof numVal === "function" ? numVal(e.p.value) : null; return v == null ? null : { v, date: e.date, unit: e.p.unit || "" }; };
+    const s = (k, txt) => { const x = L(k); return x ? txt(x) : ""; };
+    if (m.k === "vitD") return s("vitd", x => `Your last vitamin D test: ${x.v} ${x.unit} (${fmtDay(x.date).split(", ")[1] || x.date}). Below 20 ng/mL is deficient, 20–30 insufficient.`);
+    if (m.k === "b12") return s("b12", x => `Your last B12 test: ${x.v} ${x.unit}. Below 200 pg/mL is low; follow your doctor's dose.`);
+    if (m.k === "b9" || m.k === "b6") return s("homocys", x => `Your homocysteine: ${x.v} ${x.unit} (healthy below 15). B12, folate and B6 help bring it down.`);
+    if (m.k === "fe") return s("ferritin", x => `Your last ferritin: ${x.v} ${x.unit} (iron stores; below 30 is low).`);
+    if (m.k === "k" || m.k === "p" || m.k === "mg") return s("egfr", x => `Your eGFR: ${x.v} (normal kidney filtering), so food sources are fine.`);
+  } catch {}
+  return "";
+}
+
+N.miView = N.miView || "day";
+function renderMicros(){
+  const box = q("#nuMicro"); if (!box) return;
+  const days = N.miView === "week" ? Array.from({ length: 7 }, (_, i) => addDays(N.day, -i)).filter(d => dayItems(d).length) : [N.day];
+  const r = microTotals(days.length ? days : [N.day]);
+  qa("[data-miv]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.miv === N.miView)));
+  const missing = dayItems(N.day).filter(e => e.meal !== "supplements" && !(e.micros || []).length);
+  q("#nuMiHint").innerHTML = N.miView === "week" ? `Average of ${days.length} logged day${days.length === 1 ? "" : "s"}` : r.items ? `${r.est} of ${r.items} food items estimated · supplements from labels` : "";
+  const groups = ["Vitamins", "Minerals", "Other", "Limits"];
+  const row = m => { const [st, lbl, f] = microStatus(m, r), v = r.tot[m.k] || 0, goal = m.lim ?? m.t;
+    const col = st === "out" ? "var(--bad)" : st === "border" ? "var(--warn)" : st === "low" ? "var(--warn)" : "var(--ok)";
+    const sp = r.supp[m.k] ? ` · ${fmtMi(r.supp[m.k])} from supplements` : "";
+    return `<button class="nu-mi" data-mi="${m.k}"><span class="n">${e2(m.n)}${m.cap || /Kidney/.test(m.note || "") ? ' <span class="nu-kid" title="Kidney note">K</span>' : ""}</span>
+      <span class="v num">${fmtMi(v)} <small>/ ${m.lim != null ? "≤" : ""}${fmtMi(goal)} ${m.u}</small></span>
+      <span class="bar"><i style="width:${Math.min(100, f * 100)}%;background:${col}"></i></span>
+      <span class="s">${st === "low" ? `<span style="color:var(--warn)">${lbl}</span>` : st === "ok" ? `<span style="color:var(--ok)">${lbl}</span>` : chipH(st, lbl)}${sp}</span></button>`; };
+  box.innerHTML = (missing.length && N.miView === "day" ? `<div class="notice" style="margin-bottom:10px" id="nuMiMiss">${micState.busy ? "Estimating micronutrients for your food…" : `${missing.length} food item${missing.length > 1 ? "s" : ""} not estimated yet. <button class="btn" id="nuMiEst" style="margin-left:6px">Estimate now</button>`}${micState.err ? `<div class="small" style="color:var(--bad);margin-top:4px">${micState.err}</div>` : ""}</div>` : "")
+    + groups.map(g => `<div class="nu-sec">${g === "Limits" ? "Keep under" : g}</div><div class="nu-mis">${MI.filter(m => m.g === g).map(row).join("")}</div>`).join("")
+    + `<div class="row" style="justify-content:space-between;margin-top:10px"><span class="small muted">Food values are estimates from Indian (IFCT) and USDA food tables. K = kidney note. Tap a nutrient for details.</span><button class="btn" id="nuMiBack">Estimate past days</button></div>`;
+  const b = q("#nuMiEst"); if (b) b.onclick = () => estimateMicros(missing, true);
+  q("#nuMiBack").onclick = () => { const all = N.entries.filter(e => e.meal !== "supplements" && !(e.micros || []).length); if (!all.length) { toast("Every logged food already has micronutrients."); return; } estimateMicros(all, true); };
+  // estimate today's items automatically once per day view
+  if (missing.length && N.miView === "day" && !micState.busy && !micState.tried.has(N.day) && N.loaded && typeof S !== "undefined" && S.settings?.anthropic_key) { micState.tried.add(N.day); estimateMicros(missing, false); }
+}
+const micState = { busy: false, tried: new Set(), err: "" };
+async function estimateMicros(list, manual){
+  if (micState.busy || !list.length) return; micState.busy = true; micState.err = ""; renderMicros();
+  const keys = MI.map(m => `${m.k} (${m.u})`).join(", ");
+  let done = 0;
+  try {
+    for (let i = 0; i < list.length; i += 12) {
+      const chunk = list.slice(i, i + 12);
+      const items = chunk.map((e, j) => `i${j}: ${e.name}${e.serving ? ` — ${e.serving}` : ""} (${r0(e.kcal)} kcal, P ${r1(e.p)} g, C ${r1(e.c)} g, F ${r1(e.f)} g)`).join("\n");
+      const out = await askJSON(`Estimate the micronutrients in each food item exactly as eaten (the stated portion, cooked, Indian home recipe unless clear otherwise). Use IFCT 2017 (Indian Food Composition Tables) for Indian foods and USDA FoodData Central otherwise; allow for typical cooking losses and the oil/ghee implied by the fat grams.
+Items:
+${items}
+Return amounts for these keys in these units: ${keys}. vitA as µg RAE, b9 as µg DFE, omega3 = total ALA+EPA+DHA in mg, sugar = added sugar only. Use 0 when negligible. One best number each, no ranges.
+Reply with ONLY JSON: {"items":{"i0":{"vitA":0,"vitD":0}}}`, null, 900 * chunk.length + 400);
+      const res = out?.items || {};
+      for (let j = 0; j < chunk.length; j++) {
+        const o = res["i" + j]; if (!o || typeof o !== "object") continue;
+        const micros = MI.map(m => ({ n: m.k, amt: Math.max(0, +o[m.k] || 0), unit: m.u, est: 1 })).filter(x => x.amt > 0);
+        if (!micros.length) continue;
+        const e = chunk[j]; const { error } = await sb().from("food_entries").update({ micros }).eq("id", e.id);
+        if (error) throw error;
+        const loc = N.entries.find(x => x.id === e.id); if (loc) loc.micros = micros; done++;
+      }
+      renderMicros();
+    }
+    if (manual) toast(`Micronutrients estimated for ${done} item${done === 1 ? "" : "s"}`);
+  } catch (err) { micState.err = errMsg(err, "Couldn't estimate micronutrients."); }
+  finally { micState.busy = false; renderMicros(); }
+}
+function openMicro(k){
+  const m = MIK[k]; if (!m) return;
+  const days = N.miView === "week" ? Array.from({ length: 7 }, (_, i) => addDays(N.day, -i)).filter(d => dayItems(d).length) : [N.day];
+  const r = microTotals(days.length ? days : [N.day]); const [st, lbl] = microStatus(m, r), v = r.tot[m.k] || 0;
+  const contrib = Object.entries(r.by[m.k] || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const ln = labNote(m);
+  const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>${e2(m.n)}</h2>${closeBtn}</div>
+    <div class="row" style="gap:8px;margin:4px 0 10px"><b class="mono" style="font-size:1.3rem">${fmtMi(v)} ${m.u}</b>${chipH(st === "low" ? "border" : st, lbl)}<span class="small muted">${N.miView === "week" ? "7-day average" : fmtDay(N.day)}</span></div>
+    <div class="nu-kv">
+      ${m.lim != null ? `<div>Keep under</div><div>${fmtMi(m.lim)} ${m.u} / day</div>` : `<div>Your daily target</div><div>${fmtMi(m.t)} ${m.u}</div>`}
+      ${m.ul ? `<div>Safe upper limit${m.ulSupp ? " (supplements)" : ""}</div><div>${fmtMi(m.ul)} ${m.u}</div>` : ""}
+      ${m.cap ? `<div>Your kidney-aware limit</div><div>${fmtMi(m.cap)} ${m.u}</div>` : ""}
+      ${r.foodOnly[m.k] ? `<div>From food</div><div>${fmtMi(r.foodOnly[m.k])} ${m.u}</div>` : ""}
+      ${r.supp[m.k] ? `<div>From supplements</div><div>${fmtMi(r.supp[m.k])} ${m.u}</div>` : ""}
+    </div>
+    <p style="margin:10px 0 4px"><b>What it does:</b> ${e2(m.why)}</p>
+    <p style="margin:4px 0"><b>Good vegetarian sources:</b> ${e2(m.src)}</p>
+    ${m.note ? `<p style="margin:4px 0">${e2(m.note)}</p>` : ""}
+    ${ln ? `<div class="notice" style="margin-top:8px">${e2(ln)}</div>` : ""}
+    ${contrib.length ? `<div class="nu-sec">Where it came from</div><div class="nu-kv">${contrib.map(([nm, x]) => `<div>${e2(nm)}</div><div>${fmtMi(x)} ${m.u}</div>`).join("")}</div>` : ""}
+    <p class="small muted" style="margin-top:10px">Targets: ICMR-NIN 2020 RDA for Indian men where available, otherwise US National Academies DRIs; upper limits from the National Academies. General guidance, not medical advice; follow your doctor's prescription for supplements.</p>`);
+  return bg;
+}
+
+q("#nuMicro").addEventListener("click", ev => { const b = ev.target.closest("[data-mi]"); if (b) openMicro(b.dataset.mi); });
+qa("[data-miv]").forEach(b => b.onclick = () => { N.miView = b.dataset.miv; renderMicros(); });
 
 NU.render();
 })();
