@@ -557,10 +557,29 @@ async function askJSON(prompt, file, maxTokens = 1500){
   const content = [];
   if (file) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: await jpegB64(file, 1600) } });
   content.push({ type: "text", text: prompt });
-  const { text } = await claudeCall(content, { maxTokens });
-  const out = (typeof parseJSONLoose === "function" ? parseJSONLoose : JSON.parse)(text);
-  if (!out) throw { message: "Claude's reply couldn't be read. Try again." };
-  return out;
+  let lastText = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const msgs = attempt ? [...content.slice(0, -1), { type: "text", text: prompt + "\n\nIMPORTANT: reply with one compact, valid JSON object only. No explanation, no markdown, no comments, no trailing commas." }] : content;
+    const r = await claudeCall(msgs, { maxTokens: Math.max(maxTokens, 3000) * (attempt ? 2 : 1) });
+    lastText = r.text || "";
+    const out = jsonLoose(lastText);
+    if (out) return out;
+  }
+  console.warn("Unreadable Claude reply:", lastText.slice(0, 500));
+  throw { message: "Claude's reply couldn't be read. Try again, or split the description into two shorter ones." };
+}
+// tolerant JSON reader: code fences, text around the object, smart quotes, trailing commas, // comments
+function jsonLoose(t){
+  const tries = [];
+  const f = String(t || "").match(/```(?:json)?\s*([\s\S]*?)```/); if (f) tries.push(f[1]);
+  const a = t.indexOf("{"), b = t.lastIndexOf("}"); if (a >= 0 && b > a) tries.push(t.slice(a, b + 1));
+  tries.push(t);
+  for (const x of tries) {
+    for (const y of [x, x.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'").replace(/\/\/[^\n"]*$/gm, "").replace(/,\s*([}\]])/g, "$1")]) {
+      try { return JSON.parse(y); } catch {}
+    }
+  }
+  return null;
 }
 const errMsg = (err, fb) => err?.code === "no_key" ? `Add your Claude API key in <a href="#settings">Settings</a> to use this.` : e2(err?.message || fb);
 function setSt(el, html, bad){ el.className = "nu-status" + (bad ? " err" : ""); el.innerHTML = html || ""; }
