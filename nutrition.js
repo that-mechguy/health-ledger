@@ -258,6 +258,11 @@ root.innerHTML = `
   </div>
 
   <div id="nuSupp" hidden>
+    <div class="card nu-c"><div class="card-h"><h2>Describe a dose, Claude estimates</h2><span class="hint" id="nuDxHint"></span></div>
+      <textarea id="nuDxText" rows="2" placeholder="Any supplement, one or several: e.g. 1 Revital H capsule + 2 omega-3 softgels + 1 scoop ON whey + 5 g creatine"></textarea>
+      <div class="nu-row"><span class="nu-grow small muted">Multivitamins, minerals, fish oil, protein, creatine, ayurvedic/herbal, probiotics… Works out the vitamins, minerals, actives and macros in what you took.</span><button class="btn primary" id="nuDxEst">Estimate</button></div>
+      <div class="nu-status" id="nuDxSt" aria-live="polite"></div>
+      <div id="nuDxPrev"></div></div>
     <div class="grid g2">
       <div class="card"><div class="card-h"><h2>Doses</h2><span class="hint" id="nuDoseHint"></span></div><div id="nuDoses"></div></div>
       <div class="card"><div class="card-h"><h2>From supplements</h2><span class="hint" id="nuSTHint"></span></div><div id="nuSTot"></div></div>
@@ -884,7 +889,8 @@ q("#nuDoses").onclick = async ev => {
   const ab = ev.target.closest("[data-about]"); if (ab) { aboutSupp(ab.dataset.about); return; }
   const tk = ev.target.closest("[data-take]"), un = ev.target.closest("[data-undo]");
   if (tk) { const x = suppNorm(N.supps[tk.dataset.take]); tk.disabled = true;
-    try { await addEntries([{ meal: "supplements", name: x.name, serving: uLabel(x.takeQty, x.unit), ...x.dose, suppId: x.id, units: x.takeQty, micros: x.doseMicros, src: "supplement" }]); toast(`${x.name} taken`); } catch {} finally { tk.disabled = false; } }
+    const sprd = PERIOD_DAYS[x.period] || 1;
+    try { await addEntries([{ meal: "supplements", name: x.name, serving: uLabel(x.takeQty, x.unit), ...x.dose, suppId: x.id, units: x.takeQty, micros: sprd > 1 ? x.doseMicros.map(m => ({ ...m, spread: sprd })) : x.doseMicros, src: "supplement" }]); toast(`${x.name} taken`); } catch {} finally { tk.disabled = false; } }
   if (un) { const l = takenOn(un.dataset.undo, N.day), last = l[l.length - 1]; if (last) { await removeEntry(last.id); toast("Dose removed"); } }
 };
 q("#nuLib").onclick = ev => { const ab = ev.target.closest("[data-about]"); if (ab) { aboutSupp(ab.dataset.about); return; } const b = ev.target.closest("[data-edit]"); if (b) openSupp("manual", N.supps[b.dataset.edit]); };
@@ -1042,11 +1048,23 @@ const MI = [
   { k: "caffeine", n: "Caffeine", u: "mg", lim: 400, g: "Limits", re: /caffeine/, why: "Up to 400 mg/day is fine for most adults; late caffeine hurts sleep.", src: "Coffee (~80–100 mg/cup), tea (~40 mg), energy drinks, pre-workouts." }
 ];
 const MIK = Object.fromEntries(MI.map(x => [x.k, x]));
+// extra nutrients/actives found on supplement labels (creatine, CoQ10, boron, lutein…): defined once by Claude, saved in your nutrition plan
+const escRe = t => String(t).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function syncExtras(){
+  for (let i = MI.length - 1; i >= 0; i--) if (MI[i].extra) { delete MIK[MI[i].k]; MI.splice(i, 1); }
+  for (const [k, x] of Object.entries(N.plan.extraMicros || {})) {
+    if (MIK[k]) continue;
+    const names = [x.n, ...(x.aliases || [])].filter(Boolean).map(escRe);
+    const m = { ...x, k, g: "From supplements", extra: 1, re: new RegExp(names.join("|")) };
+    MI.push(m); MIK[k] = m;
+  }
+}
 const MASS = { g: 1e6, mg: 1e3, "µg": 1, ug: 1, mcg: 1 };
-function microKey(name){ const s = String(name || "").toLowerCase(); for (const m of MI) if (m.re.test(s)) return m; return null; }
+function microKey(name){ const s = String(name || "").toLowerCase().trim(); const al = (N.plan.microAliases || {})[s]; if (al && MIK[al]) return MIK[al]; for (const m of MI) if (m.re.test(s)) return m; return null; }
 // amount in the catalogue unit, or null if the unit can't be converted
 function microAmt(m, name, amt, unit){
   const u = String(unit || "").toLowerCase().replace("μ", "µ").replace(/\s+/g, ""); let v = +amt; if (!isFinite(v)) return null;
+  if (u === String(m.u || "").toLowerCase().replace("μ", "µ").replace(/\s+/g, "")) return v;
   if (u === "iu") return m.iu ? toUnit(v * m.iu, m.k === "vitA" || m.k === "vitD" ? "µg" : "mg", m.u) : null;
   const base = u.replace(/dfe|rae$/, "");
   if (!(base in MASS)) return null;
@@ -1059,14 +1077,23 @@ const fmtMi = (v, u) => v >= 100 ? nf(v) : v >= 10 ? r1(v) : (Math.round(v * 100
 
 function microTotals(days){
   const tot = {}, foodOnly = {}, supp = {}, by = {}; let items = 0, est = 0;
-  for (const d of days) for (const e of dayItems(d)) {
+  const spreadEnts = N.entries.filter(e => (e.micros || []).some(m => +m.spread > 1));
+  const dayDiff = (a, b) => Math.round((parseD(a) - parseD(b)) / 864e5);
+  for (const d of days) {
+    // weekly / monthly doses: count 1/n of the dose on each of the n days from the day it was taken
+    for (const e of spreadEnts) { const df = dayDiff(d, e.date);
+      for (const x of e.micros) { const sp = +x.spread || 1; if (sp <= 1 || df < 0 || df >= sp) continue;
+        const m = MIK[x.n] || microKey(x.n); if (!m) continue; const v = microAmt(m, x.n, x.amt, x.unit ?? m.u); if (v == null || v <= 0) continue;
+        tot[m.k] = (tot[m.k] || 0) + v / sp; supp[m.k] = (supp[m.k] || 0) + v / sp; ((by[m.k] ||= {})[e.name + ` (1/${sp} of a ${sp === 7 ? "weekly" : sp === 14 ? "fortnightly" : "monthly"} dose)`] = (by[m.k][e.name + ` (1/${sp} of a ${sp === 7 ? "weekly" : sp === 14 ? "fortnightly" : "monthly"} dose)`] || 0) + v / sp); } }
+  for (const e of dayItems(d)) {
     const isSupp = e.meal === "supplements"; if (!isSupp) { items++; if ((e.micros || []).length) est++; }
-    for (const x of e.micros || []) {
+    for (const x of e.micros || []) { if (+x.spread > 1) continue;
       const m = MIK[x.n] || microKey(x.n); if (!m) continue;
       const v = microAmt(m, x.n, x.amt, x.unit ?? m.u); if (v == null || v <= 0) continue;
       tot[m.k] = (tot[m.k] || 0) + v; (isSupp ? supp : foodOnly)[m.k] = ((isSupp ? supp : foodOnly)[m.k] || 0) + v;
       ((by[m.k] ||= {})[e.name] = (by[m.k][e.name] || 0) + v);
     }
+  }
   }
   const n = Math.max(1, days.length); for (const o of [tot, foodOnly, supp]) for (const k in o) o[k] /= n;
   for (const k in by) for (const nm in by[k]) by[k][nm] /= n;
@@ -1075,6 +1102,7 @@ function microTotals(days){
 function microStatus(m, r){
   const v = r.tot[m.k] || 0;
   if (m.lim != null) { const f = v / m.lim; return f > 1 ? ["out", "Over limit", f] : f > .8 ? ["border", "Near limit", f] : ["ok", "Under limit", f]; }
+  if (!m.t) { const top = m.cap || m.ul; if (m.ul && v > m.ul) return ["out", "Above safe limit", 1]; if (m.cap && v > m.cap) return ["border", "Above your kidney-aware limit", 1]; return ["ok", v ? "Tracked" : "None today", top ? v / top : v ? 1 : 0]; }
   const scoped = m.ulSupp ? (r.supp[m.k] || 0) : v;
   if (m.ul && scoped > m.ul) return ["out", m.ulSupp ? "Supplements above safe limit" : "Above safe limit", v / m.t];
   if (m.cap && v > m.cap) return ["border", "Above your kidney-aware limit", v / m.t];
@@ -1097,17 +1125,18 @@ function labNote(m){
 N.miView = N.miView || "day";
 function renderMicros(){
   const box = q("#nuMicro"); if (!box) return;
+  syncExtras(); classifyNew();
   const days = N.miView === "week" ? Array.from({ length: 7 }, (_, i) => addDays(N.day, -i)).filter(d => dayItems(d).length) : [N.day];
   const r = microTotals(days.length ? days : [N.day]);
   qa("[data-miv]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.miv === N.miView)));
   const missing = dayItems(N.day).filter(e => e.meal !== "supplements" && !(e.micros || []).length);
   q("#nuMiHint").innerHTML = N.miView === "week" ? `Average of ${days.length} logged day${days.length === 1 ? "" : "s"}` : r.items ? `${r.est} of ${r.items} food items estimated · supplements from labels` : "";
-  const groups = ["Vitamins", "Minerals", "Other", "Limits"];
+  const groups = ["Vitamins", "Minerals", "Other", "From supplements", "Limits"].filter(g => MI.some(m => m.g === g));
   const row = m => { const [st, lbl, f] = microStatus(m, r), v = r.tot[m.k] || 0, goal = m.lim ?? m.t;
     const col = st === "out" ? "var(--bad)" : st === "border" ? "var(--warn)" : st === "low" ? "var(--warn)" : "var(--ok)";
-    const sp = r.supp[m.k] ? ` · ${fmtMi(r.supp[m.k])} from supplements` : "";
+    const sp = r.supp[m.k] && !m.extra ? ` · ${fmtMi(r.supp[m.k])} from supplements` : "";
     return `<button class="nu-mi" data-mi="${m.k}"><span class="n">${e2(m.n)}${m.cap || /Kidney/.test(m.note || "") ? ' <span class="nu-kid" title="Kidney note">K</span>' : ""}</span>
-      <span class="v num">${fmtMi(v)} <small>/ ${m.lim != null ? "≤" : ""}${fmtMi(goal)} ${m.u}</small></span>
+      <span class="v num">${fmtMi(v)} <small>${goal ? `/ ${m.lim != null || !m.t ? "≤" : ""}${fmtMi(goal || m.cap || m.ul)} ` : ""}${m.u}</small></span>
       <span class="bar"><i style="width:${Math.min(100, f * 100)}%;background:${col}"></i></span>
       <span class="s">${st === "low" ? `<span style="color:var(--warn)">${lbl}</span>` : st === "ok" ? `<span style="color:var(--ok)">${lbl}</span>` : chipH(st, lbl)}${sp}</span></button>`; };
   box.innerHTML = (missing.length && N.miView === "day" ? `<div class="notice" style="margin-bottom:10px" id="nuMiMiss">${micState.busy ? "Estimating micronutrients for your food…" : `${missing.length} food item${missing.length > 1 ? "s" : ""} not estimated yet. <button class="btn" id="nuMiEst" style="margin-left:6px">Estimate now</button>`}${micState.err ? `<div class="small" style="color:var(--bad);margin-top:4px">${micState.err}</div>` : ""}</div>` : "")
@@ -1150,13 +1179,13 @@ Reply with ONLY JSON: {"items":{"i0":{"vitA":0,"vitD":0}}}`, null, 900 * chunk.l
 function openMicro(k){
   const m = MIK[k]; if (!m) return;
   const days = N.miView === "week" ? Array.from({ length: 7 }, (_, i) => addDays(N.day, -i)).filter(d => dayItems(d).length) : [N.day];
-  const r = microTotals(days.length ? days : [N.day]); const [st, lbl] = microStatus(m, r), v = r.tot[m.k] || 0;
+  syncExtras(); const r = microTotals(days.length ? days : [N.day]); const [st, lbl] = microStatus(m, r), v = r.tot[m.k] || 0;
   const contrib = Object.entries(r.by[m.k] || {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
   const ln = labNote(m);
   const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>${e2(m.n)}</h2>${closeBtn}</div>
     <div class="row" style="gap:8px;margin:4px 0 10px"><b class="mono" style="font-size:1.3rem">${fmtMi(v)} ${m.u}</b>${chipH(st === "low" ? "border" : st, lbl)}<span class="small muted">${N.miView === "week" ? "7-day average" : fmtDay(N.day)}</span></div>
     <div class="nu-kv">
-      ${m.lim != null ? `<div>Keep under</div><div>${fmtMi(m.lim)} ${m.u} / day</div>` : `<div>Your daily target</div><div>${fmtMi(m.t)} ${m.u}</div>`}
+      ${m.lim != null ? `<div>Keep under</div><div>${fmtMi(m.lim)} ${m.u} / day</div>` : m.t ? `<div>${m.extra ? "Usual effective dose" : "Your daily target"}</div><div>${fmtMi(m.t)} ${m.u}</div>` : `<div>Daily target</div><div>none set (no official requirement)</div>`}
       ${m.ul ? `<div>Safe upper limit${m.ulSupp ? " (supplements)" : ""}</div><div>${fmtMi(m.ul)} ${m.u}</div>` : ""}
       ${m.cap ? `<div>Your kidney-aware limit</div><div>${fmtMi(m.cap)} ${m.u}</div>` : ""}
       ${r.foodOnly[m.k] ? `<div>From food</div><div>${fmtMi(r.foodOnly[m.k])} ${m.u}</div>` : ""}
@@ -1169,6 +1198,109 @@ function openMicro(k){
     ${contrib.length ? `<div class="nu-sec">Where it came from</div><div class="nu-kv">${contrib.map(([nm, x]) => `<div>${e2(nm)}</div><div>${fmtMi(x)} ${m.u}</div>`).join("")}</div>` : ""}
     <p class="small muted" style="margin-top:10px">Targets: ICMR-NIN 2020 RDA for Indian men where available, otherwise US National Academies DRIs; upper limits from the National Academies. General guidance, not medical advice; follow your doctor's prescription for supplements.</p>`);
   return bg;
+}
+
+/* ---------- supplements: describe a dose → nutrients ---------- */
+const PERIOD_DAYS = { once: 1, daily: 1, weekly: 7, fortnightly: 14, monthly: 30 };
+let dxPending = null; // array of estimated supplement doses
+q("#nuDxEst").onclick = async () => {
+  const text = q("#nuDxText").value.trim(), st = q("#nuDxSt");
+  if (!text) { setSt(st, "Describe what you took, e.g. “1 Shelcal 500 tablet + 2 omega-3 softgels + 1 scoop whey”.", true); return; }
+  q("#nuDxEst").disabled = true; setSt(st, "Estimating… (a few seconds)"); q("#nuDxPrev").innerHTML = "";
+  try {
+    const out = await askJSON(`A person describes one or more dietary supplements they took (vitamins, minerals, multivitamins, fish oil, protein powder, creatine, herbal or ayurvedic products, probiotics, electrolytes, any brand). Work out exactly what each amount contains.
+Description: """${text}"""
+Rules: split into separate items (one per product). Use any strength stated by the person (e.g. "60,000 IU per 5 ml", "500 mg tablet"); otherwise use the product's label if it is a known Indian or international brand, else a typical product of that kind. Give amounts FOR THE AMOUNT TAKEN. List every vitamin, mineral and active ingredient (creatine, caffeine, EPA/DHA, herbal extracts, probiotics in CFU…) with units mg, µg, g, IU or CFU as printed; do not list macros there. Macros (kcal, protein p, carbs c, fat f in g, sodium na in mg) only if meaningful, else 0.
+frequency = how the product is normally taken: "daily", "weekly", "fortnightly", "monthly" or "once".
+unit = one of: ${UNITS.join(", ")}, or "dose"; qty = how many of that unit were taken (5 ml → qty 5, unit "ml"; 2 capsules → qty 2, unit "capsule").
+Person: one underdeveloped kidney (normal eGFR), high uric acid, low vitamin D and B12 in recent tests. kidneyNote: one short neutral line if relevant (high-dose vitamin D, calcium, potassium, magnesium, creatine, protein powders, herbal blends), else "".
+Reply with ONLY JSON: {"items":[{"name":"","brand":"","qty":1,"unit":"dose","frequency":"daily","kcal":0,"p":0,"c":0,"f":0,"na":0,"micros":[{"n":"","amt":0,"unit":""}],"kidneyNote":"","note":"one short line, e.g. typical use"}]}`, null, 3000);
+    const list = (Array.isArray(out?.items) ? out.items : out?.name ? [out] : []).filter(o => o && o.name).map(o => ({
+      name: String(o.name).slice(0, 80), brand: String(o.brand || ""), qty: +o.qty > 0 ? +o.qty : 1, unit: UNITS.includes(o.unit) ? o.unit : "dose",
+      freq: PERIOD_DAYS[o.frequency] ? o.frequency : "daily", kcal: r0(o.kcal), p: r1(o.p), c: r1(o.c), f: r1(o.f), na: r0(o.na),
+      micros: (o.micros || []).filter(m => m && m.n && +m.amt > 0).map(m => ({ n: String(m.n), amt: +m.amt, unit: String(m.unit || "").replace("μ", "µ") })),
+      kidneyNote: String(o.kidneyNote || ""), note: String(o.note || "") }));
+    if (!list.length) throw { message: "Couldn't recognise that. Add the product or strength, e.g. “1 Shelcal 500 tablet”." };
+    dxPending = list; setSt(st, ""); renderDx();
+  } catch (err) { setSt(st, errMsg(err, "Couldn't estimate that. Try again."), true); }
+  finally { q("#nuDxEst").disabled = false; }
+};
+function dxCard(x, i){
+  const days = PERIOD_DAYS[x.freq] || 1;
+  const rows = x.micros.map(m => { const c = microKey(m.n), v = c ? microAmt(c, m.n, m.amt, m.unit) : null, tgt = c ? (c.lim ?? c.t) : null;
+    const perDay = v != null ? v / days : null, pct = perDay != null && tgt ? Math.round(perDay / tgt * 100) : null;
+    const over = c && perDay != null && ((c.ul && perDay > c.ul) || (c.cap && perDay > c.cap));
+    return `<div>${e2(m.n)}</div><div>${+(+m.amt).toFixed(3)} ${e2(m.unit)}${v != null && c && m.unit.toLowerCase() !== c.u.toLowerCase() ? ` <span class="small muted">(= ${fmtMi(v)} ${c.u})</span>` : ""}${pct != null ? `<br><span class="small" style="color:${over ? "var(--bad)" : "var(--muted)"}">${days > 1 ? `≈ ${fmtMi(perDay)} ${c.u}/day over ${days} days · ` : ""}${pct}% of daily${over ? (days > 1 ? " · above the everyday safe limit (fine only as a doctor-prescribed course)" : " · above safe daily limit") : ""}</span>` : ""}</div>`; }).join("");
+  return `<div class="nu-pv" style="display:block;margin-top:10px" data-dx="${i}"><div class="row" style="justify-content:space-between;flex-wrap:nowrap"><div class="n">${e2(x.name)}${x.brand ? ` <span class="muted small">· ${e2(x.brand)}</span>` : ""}</div><button class="nu-x" data-dxrm="${i}" aria-label="Drop ${e2(x.name)}">✕</button></div>
+    <div class="small muted">${e2(uLabel(x.qty, x.unit))}${x.note ? " · " + e2(x.note) : ""}</div>
+    <div class="nu-kv" style="margin-top:8px">${rows || "<div>No vitamins or minerals found</div><div></div>"}${x.kcal || x.p || x.c || x.f ? `<div>Calories · P · C · F</div><div>${nf(x.kcal)} kcal · ${x.p} · ${x.c} · ${x.f} g</div>` : ""}${x.na ? `<div>Sodium</div><div>${nf(x.na)} mg</div>` : ""}</div>
+    ${x.kidneyNote ? `<div class="notice" style="margin-top:8px">${chipH("border", "Kidney")} ${e2(x.kidneyNote)}</div>` : ""}
+    <div class="row" style="margin-top:8px;align-items:end"><label class="small muted" style="display:flex;flex-direction:column;gap:3px">How often<select data-dxfreq="${i}">${Object.keys(PERIOD_DAYS).map(k => `<option value="${k}" ${k === x.freq ? "selected" : ""}>${k[0].toUpperCase() + k.slice(1)}</option>`).join("")}</select></label>
+      <span class="nu-grow small muted">${days > 1 ? `Spread over ${days} days in your daily totals.` : ""}</span>
+      <button class="btn" data-dxsave="${i}">Save to my supplements</button><button class="btn primary" data-dxlog="${i}">Log</button></div></div>`;
+}
+function renderDx(){
+  const box = q("#nuDxPrev"); if (!dxPending?.length) { dxPending = null; box.innerHTML = ""; return; }
+  syncExtras();
+  box.innerHTML = dxPending.map(dxCard).join("") + (dxPending.length > 1 ? `<div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="dxX">Discard all</button><button class="btn primary" id="dxLogAll">Log all ${dxPending.length}${N.day === N.today ? " today" : ""}</button></div>` : "");
+  const all = q("#dxLogAll"); if (all) all.onclick = async e => { e.target.disabled = true; try { for (const x of dxPending) await logDx(x, null); toast(`Logged ${dxPending.length} supplements`); dxPending = null; q("#nuDxText").value = ""; renderDx(); } catch { e.target.disabled = false; } };
+  const dx = q("#dxX"); if (dx) dx.onclick = () => { dxPending = null; renderDx(); };
+}
+q("#nuDxPrev").addEventListener("change", ev => { const i = ev.target.dataset.dxfreq; if (i == null) return; dxPending[+i].freq = ev.target.value; renderDx(); });
+q("#nuDxPrev").addEventListener("click", async ev => {
+  const rm = ev.target.closest("[data-dxrm]"), lg = ev.target.closest("[data-dxlog]"), sv = ev.target.closest("[data-dxsave]");
+  const done = i => { dxPending.splice(i, 1); if (!dxPending.length) q("#nuDxText").value = ""; renderDx(); };
+  if (rm) { done(+rm.dataset.dxrm); return; }
+  if (lg) { const i = +lg.dataset.dxlog, x = dxPending[i]; lg.disabled = true; try { await logDx(x, null); toast(`${x.name} logged`); done(i); } catch { lg.disabled = false; } return; }
+  if (sv) { const i = +sv.dataset.dxsave, x = dxPending[i]; sv.disabled = true;
+    try { const sp = await saveSupp({ name: x.name, brand: x.brand, unit: x.unit, servingQty: x.qty, takeQty: x.qty, packUnits: 0, perServing: { kcal: x.kcal, p: x.p, c: x.c, f: x.f, na: x.na }, microsServing: x.micros,
+        dosesPerDay: 1, timing: "", packStart: N.today, kidneyNote: x.kidneyNote, period: x.freq, src: "ai", active: true });
+      if (confirm(`Saved ${x.name}. Also log a dose as taken ${N.day === N.today ? "today" : "on " + fmtDay(N.day)}?`)) await logDx(x, sp.id);
+      toast("Saved to My supplements"); done(i); } catch { sv.disabled = false; } }
+});
+async function logDx(x, suppId){
+  const spread = PERIOD_DAYS[x.freq] || 1;
+  await addEntries([{ meal: "supplements", name: x.name, serving: uLabel(x.qty, x.unit), kcal: x.kcal, p: x.p, c: x.c, f: x.f, na: x.na || null, suppId: suppId || null, units: x.qty,
+    micros: x.micros.map(m => spread > 1 ? { ...m, spread } : m), src: "supplement" }]);
+}
+
+/* ---------- new nutrients from supplement labels: classify once with Claude ---------- */
+const extraState = { busy: false, failed: new Set() };
+function unknownSuppNames(){
+  const names = new Set();
+  const add = m => { const nm = String(m?.n || "").trim(); if (nm && !microKey(nm) && !extraState.failed.has(nm.toLowerCase()) && !(N.plan.microIgnore || []).includes(nm.toLowerCase())) names.add(nm); };
+  for (const s of Object.values(N.supps)) for (const m of suppNorm(s).doseMicros || []) add(m);
+  for (const e of N.entries) if (e.meal === "supplements") for (const m of e.micros || []) add(m);
+  return [...names];
+}
+async function classifyNew(){
+  if (extraState.busy || !N.loaded || typeof S === "undefined" || !S.settings?.anthropic_key) return;
+  const names = unknownSuppNames(); if (!names.length) return;
+  extraState.busy = true;
+  try {
+    const known = MI.filter(m => !m.extra).map(m => `${m.k}=${m.n}`).join(", ");
+    const sample = names.map(nm => { for (const s of Object.values(N.supps)) { const m = (suppNorm(s).doseMicros || []).find(x => x.n === nm); if (m) return `${nm} (label: ${m.amt} ${m.unit || ""}, in "${s.name}")`; } return nm; });
+    const out = await askJSON(`These ingredient names come from dietary supplement labels and don't match the person's nutrient list.
+Known nutrients (key=name): ${known}.
+Ingredients: ${sample.join("; ")}
+For each ingredient: if it is really one of the known nutrients (a form or salt, e.g. "Zinc bisglycinate" = zn, "Menaquinone-7" = vitK), give "same_as" with that key. Otherwise define it as a new tracked item for a 29-year-old man with ONE underdeveloped kidney (normal eGFR) and high uric acid:
+key (short camelCase), n (display name), u (the unit amounts are usually labelled in: mg, µg, g, IU or CFU), t (usual effective daily intake from studies, or null if none), ul (tolerable/safe upper limit per day or null), cap (lower kidney-aware limit if relevant, else null), why (one line: what it does), src (food sources or "supplement only"), note (one line on evidence and any kidney/uric-acid caution), aliases (2-6 lowercase name variants as they appear on labels).
+Reply with ONLY JSON: {"items":[{"label":"exact ingredient name as given","same_as":"","key":"","n":"","u":"","t":null,"ul":null,"cap":null,"why":"","src":"","note":"","aliases":[]}]}`, null, 2500);
+    const ex = { ...(N.plan.extraMicros || {}) }, al = { ...(N.plan.microAliases || {}) }, ign = [...(N.plan.microIgnore || [])];
+    const num = v => v == null || v === "" || !isFinite(+v) ? null : +v;
+    for (const it of out.items || []) {
+      const label = String(it.label || "").toLowerCase().trim(); if (!label) continue;
+      if (it.same_as && MIK[it.same_as] && !MIK[it.same_as].extra) { al[label] = it.same_as; continue; }
+      const key = String(it.key || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 24);
+      if (!key || MIK[key]) { if (MIK[key]) al[label] = key; else ign.push(label); continue; }
+      ex[key] = { n: String(it.n || it.label).slice(0, 40), u: String(it.u || "mg").slice(0, 8), t: num(it.t), ul: num(it.ul), cap: num(it.cap),
+        why: String(it.why || ""), src: String(it.src || ""), note: String(it.note || ""), aliases: [label, ...(it.aliases || []).map(a => String(a).toLowerCase())].slice(0, 8) };
+    }
+    for (const nm of names) if (!Object.values(ex).some(x => x.aliases.includes(nm.toLowerCase())) && !al[nm.toLowerCase()]) extraState.failed.add(nm.toLowerCase());
+    await savePlan({ extraMicros: ex, microAliases: al, microIgnore: [...new Set(ign)] });
+    toast("New nutrients from your supplements added to tracking");
+  } catch (err) { names.forEach(n => extraState.failed.add(n.toLowerCase())); console.warn("classify extras:", err?.message || err); }
+  finally { extraState.busy = false; }
 }
 
 /* ---------- supplement details: what it does, effects, best pairings ---------- */
