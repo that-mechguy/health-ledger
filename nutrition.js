@@ -115,6 +115,9 @@ css.textContent = `
 .nu-item .n{cursor:pointer}
 .nu-x:hover{color:var(--bad);background:var(--bad-bg)}
 .nu-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.si-link{cursor:pointer}.si-link:hover{color:var(--accent)}
+.si-row{padding:7px 0;border-top:1px solid var(--grid)}.si-row:first-of-type{border-top:0}
+.si-ul{margin:4px 0;padding-left:20px;display:flex;flex-direction:column;gap:3px;font-size:.9rem}
 .nu-mis{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:4px 22px}
 .nu-mi{all:unset;box-sizing:border-box;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 10px;padding:8px 0;border-top:1px solid var(--grid)}
 .nu-mi:hover .n,.nu-mi:focus-visible .n{color:var(--accent)}
@@ -864,7 +867,7 @@ function renderSupp(){
   const d = N.day, act_ = suppList().filter(x => x.active !== false);
   q("#nuDoseHint").textContent = d === N.today ? "Today" : fmtDay(d);
   q("#nuDoses").innerHTML = act_.length ? act_.map(x0 => { const x = suppNorm(x0), n = takenOn(x.id, d).length, per = Math.max(1, +x.dosesPerDay || 1), pd = x.dose;
-    return `<div class="nu-dose"><div class="n">${e2(x.name)}</div><div class="s">${e2(uLabel(x.takeQty, x.unit))} per dose · ${nf(pd.kcal)} kcal · P ${pd.p} · C ${pd.c} · F ${pd.f}${x.timing ? ` · ${e2(x.timing)}` : ""} ${x0.packUnits ? "<br>" + packLine(packLeft(x0)) : ""}</div>
+    return `<div class="nu-dose"><div class="n si-link" data-about="${e2(x.id)}" role="button" tabindex="0">${e2(x.name)} <span class="muted">ⓘ</span></div><div class="s">${e2(uLabel(x.takeQty, x.unit))} per dose · ${nf(pd.kcal)} kcal · P ${pd.p} · C ${pd.c} · F ${pd.f}${x.timing ? ` · ${e2(x.timing)}` : ""} ${x0.packUnits ? "<br>" + packLine(packLeft(x0)) : ""}</div>
       <div class="ctl"><span class="nu-pips" aria-label="${n} of ${per} doses taken">${Array.from({ length: Math.max(per, n) }, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("")}</span>
       <button class="nu-sq" data-undo="${e2(x.id)}" ${n ? "" : "disabled"} aria-label="Undo a dose">−</button><button class="nu-sq plus" data-take="${e2(x.id)}" aria-label="Take a dose">+</button></div></div>`; }).join("")
     : `<div class="empty">No supplements yet. Add the ones you take below and they appear here as a daily checklist.</div>`;
@@ -874,16 +877,17 @@ function renderSupp(){
   q("#nuSTot").innerHTML = ents.length ? `<div class="nu-kv"><div>Calories</div><div>${nf(t.kcal)} kcal</div><div>Protein</div><div>${r1(t.p)} g</div><div>Carbs</div><div>${r1(t.c)} g</div><div>Fat</div><div>${r1(t.f)} g</div>${t.na ? `<div>Sodium</div><div>${nf(t.na)} mg</div>` : ""}
     ${Object.values(mi).map(m => `<div>${e2(m.n)}</div><div>${+m.amt.toFixed(2)} ${e2(m.unit)}</div>`).join("")}</div><p class="small muted">Already included in the day's calorie and macro totals.</p>` : `<div class="empty">Nothing taken on this day.</div>`;
   const all = suppList(); q("#nuLibHint").textContent = all.length ? `${all.length} saved` : "";
-  q("#nuLib").innerHTML = all.map(x0 => { const x = suppNorm(x0); return `<div class="lrow" style="${x.active === false ? "opacity:.55" : ""}"><div class="n">${e2(x.name)}${x.brand ? ` <span class="muted small">· ${e2(x.brand)}</span>` : ""}</div><button class="btn" data-edit="${e2(x.id)}">Edit</button>
+  q("#nuLib").innerHTML = all.map(x0 => { const x = suppNorm(x0); return `<div class="lrow" style="${x.active === false ? "opacity:.55" : ""}"><div class="n si-link" data-about="${e2(x.id)}" role="button" tabindex="0">${e2(x.name)} <span class="muted">ⓘ</span>${x.brand ? ` <span class="muted small">· ${e2(x.brand)}</span>` : ""}</div><button class="btn" data-edit="${e2(x.id)}">Edit</button>
     <div class="d">${x0.perServing ? `Label serving ${e2(uLabel(x.servingQty, x.unit))} · you take ${e2(uLabel(x.takeQty, x.unit))}` : ""} · ${Math.max(1, +x.dosesPerDay || 1)}×/day${x.active === false ? " · paused" : ""} ${x0.packUnits ? " · " + packLine(packLeft(x0)) : ""} ${x.kidneyNote ? "<br>" + chipH("border", x.kidneyNote) : ""}</div></div>`; }).join("");
 }
 q("#nuDoses").onclick = async ev => {
+  const ab = ev.target.closest("[data-about]"); if (ab) { aboutSupp(ab.dataset.about); return; }
   const tk = ev.target.closest("[data-take]"), un = ev.target.closest("[data-undo]");
   if (tk) { const x = suppNorm(N.supps[tk.dataset.take]); tk.disabled = true;
     try { await addEntries([{ meal: "supplements", name: x.name, serving: uLabel(x.takeQty, x.unit), ...x.dose, suppId: x.id, units: x.takeQty, micros: x.doseMicros, src: "supplement" }]); toast(`${x.name} taken`); } catch {} finally { tk.disabled = false; } }
   if (un) { const l = takenOn(un.dataset.undo, N.day), last = l[l.length - 1]; if (last) { await removeEntry(last.id); toast("Dose removed"); } }
 };
-q("#nuLib").onclick = ev => { const b = ev.target.closest("[data-edit]"); if (b) openSupp("manual", N.supps[b.dataset.edit]); };
+q("#nuLib").onclick = ev => { const ab = ev.target.closest("[data-about]"); if (ab) { aboutSupp(ab.dataset.about); return; } const b = ev.target.closest("[data-edit]"); if (b) openSupp("manual", N.supps[b.dataset.edit]); };
 q("#nuSFind").onclick = () => openSupp("search"); q("#nuSScan").onclick = () => openSupp("scan"); q("#nuSMan").onclick = () => openSupp("manual");
 const SUPP_JSON = `{"name":"","brand":"","unit":"capsule","servingQty":2,"packUnits":60,"perServing":{"kcal":0,"p":0,"c":0,"f":0,"na":0},"micros":[{"n":"Vitamin D3","amt":1000,"unit":"IU"}],"kidneyNote":"","note":"","found":true}`;
 const SUPP_RULES = `Rules: unit = one countable piece (${UNITS.join(", ")}); powders by scoop → "scoop". servingQty = units in ONE label serving. packUnits = units in the whole pack (or servings per container × servingQty; net weight ÷ scoop grams), 0 if unknown. perServing = per ONE label serving: kcal, p, c, f in g, na in mg. micros = every vitamin/mineral/active per serving with amount and unit (IU, mg, µg, g), incl. creatine, caffeine, EPA/DHA; not macros. kidneyNote: the person has ONE underdeveloped kidney (normal eGFR, protein cap ~120 g/day): for creatine, protein powders, vitamin D > 2,000 IU/serving, vitamin C ≥ 500 mg, potassium/magnesium/phosphorus, herbal blends or NSAIDs give ONE short neutral line like "Creatine: check with your nephrologist", else "".`;
@@ -1165,6 +1169,116 @@ function openMicro(k){
     ${contrib.length ? `<div class="nu-sec">Where it came from</div><div class="nu-kv">${contrib.map(([nm, x]) => `<div>${e2(nm)}</div><div>${fmtMi(x)} ${m.u}</div>`).join("")}</div>` : ""}
     <p class="small muted" style="margin-top:10px">Targets: ICMR-NIN 2020 RDA for Indian men where available, otherwise US National Academies DRIs; upper limits from the National Academies. General guidance, not medical advice; follow your doctor's prescription for supplements.</p>`);
   return bg;
+}
+
+/* ---------- supplement details: what it does, effects, best pairings ---------- */
+// Pairing rules (well-established nutrient interactions). "with" = take together; "apart" = separate by ~2 h.
+const PAIR = {
+  vitD: { with: [["Vitamin K2 (MK-7)", "Helps direct the extra calcium vitamin D absorbs into bone instead of soft tissue.", /k2|mk-?7|menaquinone|vitamin k/],
+                 ["Magnesium", "Needed to activate vitamin D in the body; low magnesium blunts its effect.", /magnes/],
+                 ["A meal with some fat", "Vitamin D is fat-soluble; absorption is noticeably better with a fat-containing meal.", null]] },
+  vitK: { with: [["Vitamin D3", "D3 raises calcium absorption; K2 helps route it to bone.", /vitamin d|d3|cholecalciferol/]] },
+  ca: { with: [["Vitamin D3", "Vitamin D is needed to absorb calcium.", /vitamin d|d3/]], apart: [["Iron", "Calcium blocks iron absorption.", /\biron\b|ferrous/], ["Zinc", "High calcium doses reduce zinc uptake.", /zinc/]] },
+  fe: { with: [["Vitamin C (or amla, lemon, guava)", "Vitamin C can multiply iron absorption from plant sources and supplements.", /vitamin c|ascorb/]],
+        apart: [["Calcium, dairy", "Calcium blocks iron absorption.", /calcium/], ["Tea / coffee", "Tannins and polyphenols block iron; keep 1–2 h apart.", null], ["Zinc", "High-dose zinc and iron compete for absorption.", /zinc/]] },
+  zn: { apart: [["Iron", "Compete for the same absorption route.", /\biron\b|ferrous/], ["Calcium", "Reduces zinc uptake.", /calcium/]],
+        with: [["Copper (only with long-term zinc above 25 mg/day)", "Long-term high zinc can cause copper deficiency; many formulas add 1–2 mg copper.", /copper/]] },
+  mg: { with: [["Vitamin D3", "Magnesium activates vitamin D; the two work together.", /vitamin d|d3/], ["Evening / bedtime", "Magnesium glycinate or citrate at night can support relaxation and sleep.", null]],
+        apart: [["Zinc or calcium in large doses", "Very high doses compete for absorption.", /zinc|calcium/]] },
+  b12: { with: [["Folate (B9)", "B12 and folate work together to lower homocysteine (yours was high).", /folate|folic|methylfolate/], ["Vitamin B6", "B6 also helps clear homocysteine.", /b6|pyridox/]] },
+  b9: { with: [["Vitamin B12", "Taking folate without enough B12 can mask a B12 deficiency; take them together.", /b12|cobalamin/]] },
+  b6: { with: [["B12 and folate", "Together they lower homocysteine.", /b12|folate|folic/]] },
+  vitC: { with: [["Iron", "Vitamin C boosts iron absorption.", /\biron\b|ferrous/]] },
+  omega3: { with: [["A meal with fat", "Fish/algae oil is absorbed much better with food, and burps less.", null], ["Vitamin E (often already in the capsule)", "Protects the oil from oxidation.", /vitamin e|tocoph/]] },
+  vitA: { with: [["A meal with fat", "Fat-soluble; absorbed best with food.", null]] },
+  vitE: { with: [["A meal with fat", "Fat-soluble; absorbed best with food.", null]] }
+};
+// non-vitamin actives found in labels → short notes
+const ACTIVE = [
+  [/creatine/, "Creatine: improves strength and power output in training. Raises blood creatinine a little (a lab artefact, not kidney damage) — tell your doctor before kidney tests, and check with your nephrologist given the single kidney. Take daily with water; timing doesn't matter."],
+  [/ashwagandha|withania/, "Ashwagandha: may lower stress/cortisol and modestly support sleep and testosterone. Avoid with thyroid medication changes without advice; pause if you get stomach upset."],
+  [/curcumin|turmeric/, "Curcumin: anti-inflammatory; poorly absorbed alone — pair with black pepper (piperine) and fat."],
+  [/caffeine|green tea extract/, "Caffeine: alertness and training performance; keep under 400 mg/day and stop 8 h before bed."],
+  [/whey|protein/, "Protein powder: counts toward your 110–120 g/day protein cap (uric acid, single kidney)."],
+  [/electrolyte|potassium/, "Electrolytes/potassium: fine with normal kidney function, but don't take potassium supplements daily without your doctor."],
+  [/probiotic|lactobac|bifido/, "Probiotics: gut health; benefits are strain-specific and modest."],
+  [/melatonin/, "Melatonin: helps fall asleep; use 0.5–3 mg 30–60 min before bed, short-term."],
+  [/collagen/, "Collagen: may help skin and joints; counts as protein."]
+];
+
+function suppComposition(x){
+  const out = [];
+  for (const m of x.doseMicros || x.micros || []) { const c = microKey(m.n); const v = c ? microAmt(c, m.n, m.amt, m.unit) : null; out.push({ raw: m, cat: c, v }); }
+  return out;
+}
+function suppHash(x){ return JSON.stringify([x.name, x.brand, (x.doseMicros || x.micros || []).map(m => [m.n, m.amt, m.unit]), x.dose]); }
+
+async function aboutSupp(id){
+  const x0 = N.supps[id]; if (!x0) return; const x = suppNorm(x0);
+  const comp = suppComposition(x), stack = suppList().filter(s => s.active !== false && s.id !== id);
+  const stackText = stack.map(s => [s.name, ...((suppNorm(s).doseMicros || []).map(m => m.n))].join(" ")).join(" | ").toLowerCase();
+  const own = (x.doseMicros || []).map(m => m.n).join(" ").toLowerCase();
+  // pairing advice from the rules, marked if already covered by this or another supplement
+  const pairs = [], apart = [];
+  for (const c of comp) { const r = c.cat && PAIR[c.cat.k]; if (!r) continue;
+    for (const [what, why, re] of r.with || []) if (!pairs.some(p => p.what === what)) pairs.push({ what, why, have: re ? (re.test(own) ? "In this supplement" : re.test(stackText) ? "Already in your stack" : "") : "" });
+    for (const [what, why, re] of r.apart || []) if (!apart.some(p => p.what === what)) apart.push({ what, why, clash: re && re.test(stackText) }); }
+  const actives = ACTIVE.filter(([re]) => re.test((x.name + " " + own).toLowerCase())).map(a => a[1]);
+  const pd = x.dose || {};
+  const compRows = comp.map(c => { const tgt = c.cat ? (c.cat.lim ?? c.cat.t) : null, pct = c.v != null && tgt ? Math.round(c.v / tgt * 100) : null;
+    const over = c.cat && c.v != null && ((c.cat.ul && c.v > c.cat.ul) || (c.cat.cap && c.v > c.cat.cap));
+    return `<div>${e2(c.raw.n)}</div><div>${+(+c.raw.amt).toFixed(3)} ${e2(c.raw.unit || "")}${pct != null ? ` <span class="small ${over ? "" : "muted"}" ${over ? 'style="color:var(--bad)"' : ""}>· ${pct}% of daily${over ? " · above limit" : ""}</span>` : ""}</div>`; }).join("");
+  const skipK = pairs.map(p => p.what.toLowerCase().split(/[(,/]/)[0].trim().split(" ").slice(0, 2).join(" "));
+  const ins = x0.insight && x0.insightHash === suppHash(x) ? x0.insight : null;
+  const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>${e2(x.name)}</h2>${closeBtn}</div>
+    <div class="small muted">${x.brand ? e2(x.brand) + " · " : ""}${e2(uLabel(x.takeQty, x.unit))} per dose · ${Math.max(1, +x.dosesPerDay || 1)}×/day${x.timing ? " · " + e2(x.timing) : ""}</div>
+    <div class="nu-sec">What one dose gives you</div>
+    <div class="nu-kv">${pd.kcal || pd.p || pd.c || pd.f ? `<div>Calories · protein · carbs · fat</div><div>${nf(pd.kcal || 0)} kcal · ${r1(pd.p || 0)} · ${r1(pd.c || 0)} · ${r1(pd.f || 0)} g</div>` : ""}${compRows || `<div>No vitamins or minerals listed</div><div></div>`}</div>
+    <div id="siAI">${ins ? insightHTML({ ...ins }, skipK) : `<div class="notice" style="margin-top:12px">${S.settings?.anthropic_key ? "Working out what it does for you…" : "Add your Claude API key in Settings to see what this supplement does for your body."}</div>`}</div>
+    ${pairs.length ? `<div class="nu-sec">Best taken with</div>${pairs.map(p => `<div class="si-row"><b>${e2(p.what)}</b>${p.have ? ` ${chipH("ok", p.have)}` : ""}<div class="small muted">${e2(p.why)}</div></div>`).join("")}` : ""}
+    ${apart.length ? `<div class="nu-sec">Keep about 2 hours apart from</div>${apart.map(p => `<div class="si-row"><b>${e2(p.what)}</b>${p.clash ? ` ${chipH("border", "In your stack")}` : ""}<div class="small muted">${e2(p.why)}</div></div>`).join("")}` : ""}
+    ${actives.length ? `<div class="nu-sec">Other ingredients</div>${actives.map(a => `<p class="small" style="margin:4px 0">${e2(a)}</p>`).join("")}` : ""}
+    ${x.kidneyNote ? `<div class="notice" style="margin-top:10px">${chipH("border", "Kidney")} ${e2(x.kidneyNote)}</div>` : ""}
+    <div class="row" style="justify-content:space-between;margin-top:12px"><span class="small muted">General information, not medical advice. Effects of supplements are usually modest and mainly help if you're low.</span><button class="btn" id="siRe">Refresh</button></div>`);
+  bg.querySelector("#siRe").onclick = () => genInsight(x0, x, bg, skipK);
+  if (!ins && S.settings?.anthropic_key) genInsight(x0, x, bg, skipK);
+}
+function insightHTML(i, skip = []){
+  const list = a => (a || []).filter(Boolean).map(t => `<li>${e2(t)}</li>`).join("");
+  const eff = [["💪 Physical", i.physical], ["❤️ Sexual health", i.sexual], ["🙂 Mood & mind", i.emotional]].filter(([, v]) => v && String(v).trim() && !/^none|^no (meaningful|direct)/i.test(String(v).trim()));
+  return `<div class="nu-sec">What it does for your body</div><ul class="si-ul">${list(i.functions)}</ul>
+    ${eff.length ? `<div class="nu-sec">Effects you might notice</div>${eff.map(([k, v]) => `<div class="si-row"><b>${k}</b><div class="small">${e2(v)}</div></div>`).join("")}` : ""}
+    ${i.forYou ? `<div class="notice" style="margin-top:10px"><b>For you:</b> ${e2(i.forYou)}</div>` : ""}
+    ${i.timing ? `<p class="small" style="margin:8px 0 0"><b>When to take it:</b> ${e2(i.timing)}</p>` : ""}
+    ${(i.pairWith = (i.pairWith || []).filter(p => !skip.some(k => String(p.with || p).toLowerCase().includes(k)))).length ? `<div class="nu-sec">Also pairs well with</div><ul class="si-ul">${(i.pairWith || []).map(p => `<li><b>${e2(p.with || p)}</b>${p.why ? ` — ${e2(p.why)}` : ""}</li>`).join("")}</ul>` : ""}
+    ${(i.cautions || []).length ? `<div class="nu-sec">Cautions</div><ul class="si-ul">${list(i.cautions)}</ul>` : ""}
+    ${i.evidence ? `<p class="small muted" style="margin:8px 0 0">Evidence: ${e2(i.evidence)}</p>` : ""}`;
+}
+async function genInsight(x0, x, bg, skipK = []){
+  const box = bg.querySelector("#siAI"); if (!box) return;
+  box.innerHTML = `<div class="notice" style="margin-top:12px">Working out what it does for you…</div>`;
+  try {
+    let labs = "";
+    try { if (typeof D !== "undefined" && D?.latest) { const L = ["vitd", "b12", "homocys", "ferritin", "testo", "ftesto", "shbg", "uric", "egfr", "tsh", "hba1c", "ldl", "tg"].map(k => { const e = D.latest[k]; return e ? `${e.p.name} ${e.p.value} ${e.p.unit || ""} (range ${e.p.ref || "?"})` : ""; }).filter(Boolean); labs = L.join("; "); } } catch {}
+    const comp = (x.doseMicros || []).map(m => `${m.n}: ${m.amt} ${m.unit || ""}`).join(", ");
+    const stack = suppList().filter(s => s.active !== false && s.id !== x0.id).map(s => s.name).join(", ");
+    const out = await askJSON(`Explain a dietary supplement for the person taking it, based on its exact composition. Be accurate, evidence-based and calm; don't overstate effects. Effects are mostly meaningful when correcting a deficiency.
+Supplement: ${x.name}${x.brand ? ` (${x.brand})` : ""}. Per dose (${uLabel(x.takeQty, x.unit)}, ${Math.max(1, +x.dosesPerDay || 1)}×/day): ${comp || "no vitamins/minerals listed"}; macros ${JSON.stringify(x.dose || {})}.
+Person: 29-year-old Indian vegetarian man, gym 2–3×/week, one underdeveloped kidney with normal eGFR, high uric acid. Recent labs: ${labs || "not available"}. Other supplements he takes: ${stack || "none"}.
+Reply with ONLY JSON:
+{"functions":["3-6 short bullets: which body functions/systems it supports"],
+ "physical":"energy, muscle, bones, recovery, skin/hair etc. — or empty if none",
+ "sexual":"libido, testosterone, erectile function, fertility/sperm — only if there is real evidence, else empty",
+ "emotional":"mood, stress, sleep, focus — or empty",
+ "forYou":"1-2 sentences linking it to his labs (e.g. low vitamin D or B12, high homocysteine), or empty",
+ "timing":"best time and with/without food",
+ "pairWith":[{"with":"","why":""}],
+ "cautions":["dose/kidney/interaction cautions, short"],
+ "evidence":"strong / moderate / limited, one short phrase"}`, null, 1800);
+    const ins = { functions: out.functions || [], physical: out.physical || "", sexual: out.sexual || "", emotional: out.emotional || "", forYou: out.forYou || "", timing: out.timing || "", pairWith: (out.pairWith || []).slice(0, 5), cautions: out.cautions || [], evidence: out.evidence || "" };
+    box.innerHTML = insightHTML({ ...ins }, skipK);
+    try { await saveSupp({ ...x0, insight: ins, insightHash: suppHash(x) }); } catch {}
+  } catch (err) { box.innerHTML = `<div class="notice" style="margin-top:12px;color:var(--bad)">${errMsg(err, "Couldn't get the details.")}</div>`; }
 }
 
 q("#nuMicro").addEventListener("click", ev => { const b = ev.target.closest("[data-mi]"); if (b) openMicro(b.dataset.mi); });
