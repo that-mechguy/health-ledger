@@ -6,8 +6,8 @@
 <title>Health Ledger</title>
 <meta name="description" content="Personal health dashboard: blood tests, body scans and Apple Health activity.">
 <meta name="robots" content="noindex,nofollow">
-<meta name="theme-color" content="#EDF1EF" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0E1412" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -15,8 +15,6 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <style>
@@ -267,6 +265,148 @@ ol.steps{padding-left:20px;margin:6px 0;display:flex;flex-direction:column;gap:6
 .mx-t{width:100%;border-collapse:collapse;font-size:.88rem} .mx-t th{text-align:left;font-size:.74rem;color:var(--muted);font-weight:600;padding:4px 8px 6px 0} .mx-t td{padding:7px 8px 7px 0;border-top:1px solid var(--line);vertical-align:top}
 .mrow .mn::after{content:" ⓘ";color:var(--muted);font-size:.8em}
 .lrow.click{cursor:pointer} .lrow.click:hover .n{color:var(--accent)}
+/* ================= Apple-style theme (overrides) =================
+   iOS system colours and grouped backgrounds, SF system type with size-specific tracking,
+   one translucent glass layer for the top bar, press feedback on touch-down, spring easing,
+   iOS sheets. Respects reduced motion, reduced transparency and increased contrast. */
+:root{
+  --bg:#F2F2F7; --surface:#FFFFFF; --surface-2:#F2F2F7; --ink:#000000; --ink-2:rgba(60,60,67,.85); --muted:rgba(60,60,67,.6);
+  --line:rgba(60,60,67,.18); --grid:rgba(60,60,67,.12); --fill:rgba(118,118,128,.12); --fill-2:rgba(118,118,128,.2);
+  --accent:#007AFF; --accent-soft:rgba(0,122,255,.12); --accent-ink:#FFFFFF;
+  --ok:#248A3D; --ok-bg:rgba(52,199,89,.15); --warn:#B25000; --warn-bg:rgba(255,149,0,.16); --bad:#D70015; --bad-bg:rgba(255,59,48,.13);
+  --info:#3A3A3C; --info-bg:rgba(118,118,128,.14); --band:rgba(52,199,89,.12);
+  --f-display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI Variable Display","Segoe UI",system-ui,Roboto,"Helvetica Neue",Arial,sans-serif;
+  --f-body:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",system-ui,Roboto,"Helvetica Neue",Arial,sans-serif;
+  --f-mono:ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --r:18px; --r-sm:12px;
+  --glass:rgba(242,242,247,.72); --glass-edge:rgba(255,255,255,.55); --scrim:rgba(0,0,0,.32);
+  /* springs (Apple damping / response), sampled for CSS. Transitions retarget from the live value, so they stay interruptible. */
+  --spring:linear(0, 0.02, 0.069, 0.135, 0.21, 0.288, 0.366, 0.44, 0.508, 0.572, 0.628, 0.679, 0.724, 0.764, 0.799, 0.828, 0.854, 0.877, 0.896, 0.912, 0.926, 0.938, 0.948, 0.956, 0.963, 0.969, 0.974, 0.979, 0.982, 0.985, 0.988, 0.99, 0.991, 0.993, 0.994, 0.995, 0.996, 0.997, 0.997, 0.998, 1);
+  --spring-t:.475s; /* damping 1.0, response 0.35 */
+  --spring-bounce:linear(0, 0.018, 0.065, 0.132, 0.21, 0.294, 0.38, 0.463, 0.542, 0.615, 0.681, 0.74, 0.792, 0.836, 0.874, 0.906, 0.933, 0.954, 0.971, 0.985, 0.995, 1.002, 1.008, 1.011, 1.014, 1.015, 1.015, 1.015, 1.014, 1.013, 1.012, 1.011, 1.009, 1.008, 1.007, 1.006, 1.005, 1.004, 1.003, 1.002, 1);
+  --spring-bounce-t:.385s; /* damping 0.8, response 0.3: only after a flick */
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#000000; --surface:#1C1C1E; --surface-2:#2C2C2E; --ink:#FFFFFF; --ink-2:rgba(235,235,245,.85); --muted:rgba(235,235,245,.6);
+  --line:rgba(84,84,88,.6); --grid:rgba(84,84,88,.45); --fill:rgba(118,118,128,.24); --fill-2:rgba(118,118,128,.32);
+  --accent:#0A84FF; --accent-soft:rgba(10,132,255,.2); --accent-ink:#FFFFFF;
+  --ok:#30D158; --ok-bg:rgba(48,209,88,.18); --warn:#FF9F0A; --warn-bg:rgba(255,159,10,.18); --bad:#FF453A; --bad-bg:rgba(255,69,58,.2);
+  --info:#AEAEB2; --info-bg:rgba(118,118,128,.24); --band:rgba(48,209,88,.14);
+  --glass:rgba(22,22,24,.72); --glass-edge:rgba(255,255,255,.08); --scrim:rgba(0,0,0,.5); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#000000; --surface:#1C1C1E; --surface-2:#2C2C2E; --ink:#FFFFFF; --ink-2:rgba(235,235,245,.85); --muted:rgba(235,235,245,.6);
+  --line:rgba(84,84,88,.6); --grid:rgba(84,84,88,.45); --fill:rgba(118,118,128,.24); --fill-2:rgba(118,118,128,.32);
+  --accent:#0A84FF; --accent-soft:rgba(10,132,255,.2); --accent-ink:#FFFFFF;
+  --ok:#30D158; --ok-bg:rgba(48,209,88,.18); --warn:#FF9F0A; --warn-bg:rgba(255,159,10,.18); --bad:#FF453A; --bad-bg:rgba(255,69,58,.2);
+  --info:#AEAEB2; --info-bg:rgba(118,118,128,.24); --band:rgba(48,209,88,.14);
+  --glass:rgba(22,22,24,.72); --glass-edge:rgba(255,255,255,.08); --scrim:rgba(0,0,0,.5); color-scheme:dark}
+
+/* type: system font, size-specific tracking and leading */
+html{font-size:100%}
+body{font-family:var(--f-body);font-size:16px;line-height:1.42;letter-spacing:-.022em;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+h1,h2,h3{font-family:var(--f-display);font-weight:700}
+h1{letter-spacing:-.022em;line-height:1.12}
+h2{font-size:1.32rem;letter-spacing:-.02em;line-height:1.2;font-weight:700}
+h3{font-size:1.06rem;letter-spacing:-.017em;font-weight:600}
+.small,.hint,.mmeta,.muted.small{letter-spacing:-.005em}
+.eyebrow{letter-spacing:.01em;text-transform:none;font-size:.8rem;font-weight:600;color:var(--muted)}
+.mono,.num,.mval,.lrow .v,.tile .v,.delta,.rep .date,.chart text,.tip b,table.mx td.c{font-family:var(--f-mono);font-variant-numeric:tabular-nums;letter-spacing:0}
+
+/* header: one translucent glass layer, content scrolls underneath; large title */
+header.top{background:var(--glass);-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);border-bottom:0;box-shadow:0 .5px 0 var(--line)}
+.top-in{padding-block:12px 10px;gap:10px}
+.brand h1{font-size:2.05rem;letter-spacing:-.025em;line-height:1.05}
+.brand .sub{font-size:.8rem;letter-spacing:-.005em}
+.tabs{gap:6px;margin-inline:-16px;padding-inline:16px;scroll-padding-inline:16px;scroll-snap-type:x proximity}
+.tab{border:0;border-radius:99px;padding:7px 14px;font-size:.88rem;font-weight:600;letter-spacing:-.01em;color:var(--ink-2);background:var(--fill);scroll-snap-align:start;
+  transition:background-color .2s ease,color .2s ease,transform .1s ease-out}
+.tab[aria-selected="true"]{background:var(--ink);color:var(--bg);border-bottom-color:transparent}
+.refresh{border:0;background:var(--fill);width:36px;height:36px;color:var(--accent)}
+
+/* grouped cards */
+main.wrap{padding-bottom:calc(72px + env(safe-area-inset-bottom,0px))}
+section.view{gap:16px;padding-top:18px}
+.card{border:0;border-radius:var(--r);padding:18px 18px 16px;box-shadow:none}
+.card-h{margin-bottom:10px}
+.card-h h2{font-size:1.25rem}
+.card-h .hint{font-size:.8rem}
+.grid{gap:16px}
+.notice{background:var(--fill);border-radius:var(--r-sm);padding:12px 14px;font-size:.9rem}
+.sub-s,.tile,.sys button,.mx-box,.mx-band,.answer{background:var(--surface-2);border-radius:var(--r-sm)}
+:root:not([data-theme="dark"]) .sub-s,:root:not([data-theme="dark"]) .tile,:root:not([data-theme="dark"]) .sys button{background:#F2F2F7}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .sub-s,:root:not([data-theme="light"]) .tile,:root:not([data-theme="light"]) .sys button{background:#2C2C2E}}
+.sys button{border:0}
+
+/* inset hairline separators */
+.lrow,.mrow,.rep,.nu-item,.nu-mi,.si-row,.mx-t td{border-top:.5px solid var(--line)}
+.lrow:first-child,.mrow:first-of-type,.rep:first-child{border-top:0}
+
+/* controls: iOS filled buttons, capsules, fields */
+.btn{border:0;border-radius:12px;padding:9px 16px;font-size:.94rem;font-weight:600;letter-spacing:-.015em;background:var(--accent-soft);color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.danger{background:var(--bad-bg);color:var(--bad)}
+.pill-btn{border:0;border-radius:99px;padding:6px 13px;font-size:.84rem;font-weight:600;color:var(--ink-2);background:var(--fill)}
+.pill-btn[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.iconbtn{border-radius:99px;background:var(--fill);color:var(--ink-2);width:30px;height:30px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:.8rem}
+textarea,input[type=text],input[type=number],input[type=date],input[type=email],input[type=password],input[type=search],select,.toolbar input[type=search]{border:0!important;border-radius:11px!important;background:var(--fill)!important;padding:9px 12px;font-size:16px;letter-spacing:-.015em}
+textarea{font-family:var(--f-body)}
+.chip{border-radius:99px;font-size:.74rem;letter-spacing:0;padding:2px 9px}
+.bar,.progress{background:var(--fill-2)}
+.drop{border:1.5px dashed var(--line);border-radius:var(--r)}
+details.howto{border:0;background:var(--surface-2);border-radius:var(--r-sm)}
+.tip{background:var(--ink);color:var(--bg);border-radius:10px}
+table.mx th:first-child,table.mx td:first-child{background:var(--surface)}
+.tbl-wrap{border:0;border-radius:var(--r-sm);background:var(--surface)}
+.plist button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.gate{background:var(--bg)}
+
+/* press feedback: on touch-down, 0.97 in 100ms, springs back */
+.btn,.pill-btn,.tab,.refresh,.iconbtn,.sys button,.mrow,.lrow.click,.plist button,.nu-mi,.si-link,.nu-sq,.nu-x,.rep,.chip-btn,table.mx tbody tr,.nu-res button{
+  transition:transform var(--spring-t) var(--spring),background-color .2s ease,color .2s ease,opacity .2s ease;transform-origin:center;touch-action:manipulation}
+.btn:active,.pill-btn:active,.tab:active,.refresh:active,.iconbtn:active,.sys button:active,.nu-sq:active,.nu-x:active{transform:scale(.97);transition:transform .1s ease-out}
+.mrow:active,.lrow.click:active,.nu-mi:active,.plist button:active,.nu-res button:active,.rep:active{transform:scale(.985);transition:transform .1s ease-out}
+.btn:disabled:active{transform:none}
+@media (hover:hover){.btn:hover{filter:brightness(1.04)}.tab:hover{color:var(--ink)}.tab[aria-selected="true"]:hover{color:var(--bg)}}
+
+/* tab switch: content cross-fades and rises a little */
+section.view:not([hidden]){animation:viewIn var(--spring-t) var(--spring) both}
+@keyframes viewIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* iOS sheet: dims behind, rises from the bottom on a spring, drag the grabber down to dismiss */
+.sheet-bg{background:var(--scrim);transition:background-color .3s ease;-webkit-backdrop-filter:none;backdrop-filter:none}
+.sheet-bg.hl-enter{background:transparent}
+.sheet{border-radius:20px 20px 0 0;background:var(--surface);box-shadow:0 -8px 40px rgba(0,0,0,.18);transition:transform var(--spring-t) var(--spring);will-change:transform;overscroll-behavior:contain}
+.sheet-bg.hl-enter .sheet{transform:translateY(105%)}
+.hl-grab{position:sticky;top:-20px;margin:-12px auto 2px;width:100%;display:flex;justify-content:center;padding:6px 0 4px;cursor:grab;touch-action:none;z-index:2;flex:0 0 auto}
+.hl-grab i{width:36px;height:5px;border-radius:3px;background:var(--fill-2)}
+@media (min-width:760px){
+  .sheet{border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+  .sheet-bg.hl-enter .sheet{transform:translateY(24px) scale(.97);opacity:0}
+  .sheet{transition:transform var(--spring-t) var(--spring),opacity .2s ease}
+  .hl-grab{display:none}
+}
+
+/* nutrition tab rides on the same tokens */
+#v-nutrition .nu-res,#v-nutrition .nu-pv{border-color:var(--line)}
+
+/* accessibility: gentler motion, solid materials, stronger edges */
+@media (prefers-reduced-motion:reduce){
+  section.view:not([hidden]){animation:fadeIn .2s ease both}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  .sheet,.sheet-bg.hl-enter .sheet{transform:none!important;transition:opacity .2s ease!important}
+  .sheet-bg.hl-enter .sheet{opacity:0}
+  .btn:active,.pill-btn:active,.tab:active,.mrow:active,.lrow.click:active,.nu-mi:active{transform:none!important;opacity:.7}
+}
+@media (prefers-reduced-transparency:reduce){header.top{background:var(--bg);-webkit-backdrop-filter:none;backdrop-filter:none}}
+@media (prefers-contrast:more){.card,.sheet{box-shadow:0 0 0 1px var(--ink)} header.top{background:var(--bg);box-shadow:0 1px 0 var(--ink)} .tab,.pill-btn,.btn{box-shadow:inset 0 0 0 1px currentColor}}
+.sheet .card-h{flex-wrap:nowrap}
+/* large title collapses into a compact bar once you scroll, like iOS */
+.brand h1{transition:font-size .35s var(--spring)}
+header.top.compact .top-in{padding-block:8px 8px;gap:8px}
+header.top.compact .brand h1{font-size:1.06rem;letter-spacing:-.017em}
+header.top.compact .brand .sub{display:none}
+header.top.compact .refresh{width:30px;height:30px}
+@media (prefers-reduced-motion:reduce){.brand h1{transition:none}}
 </style>
 </head>
 <body>
@@ -2432,6 +2572,80 @@ renderAll();
   if (!session) showGate("login"); else await onSignedIn(session);
 })();
 
+</script>
+<script>
+/* ================= Apple-style interaction: press on touch-down, spring sheets, drag-to-dismiss ================= */
+(() => {
+  // iOS Safari only applies :active on touch when a touch listener exists
+  document.addEventListener("touchstart", () => {}, { passive: true });
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+  const rubber = (over, dim, c = 0.55) => (over * dim * c) / (dim + c * Math.abs(over));
+  const project = (v, d = 0.998) => (v / 1000) * d / (1 - d);  // where a flick would land (px)
+  const closeOf = sh => sh.querySelector("[data-close],#mxX,#rvX,#mxClose,button[aria-label='Close'],.iconbtn[aria-label='Close']");
+
+  function enhance(bg){
+    const sh = bg.querySelector(":scope > .sheet"); if (!sh || sh.dataset.hl) return; sh.dataset.hl = "1";
+    // spring in from the bottom (desktop: rise + fade), starting from the current frame
+    bg.classList.add("hl-enter"); requestAnimationFrame(() => requestAnimationFrame(() => bg.classList.remove("hl-enter")));
+    if (matchMedia("(min-width:760px)").matches) return;
+    const grab = document.createElement("div"); grab.className = "hl-grab"; grab.setAttribute("aria-hidden", "true"); grab.innerHTML = "<i></i>";
+    sh.prepend(grab);
+
+    let start = null, hist = [], dragging = false;
+    const onDown = e => {
+      if (e.button > 0) return;
+      const fromGrab = grab.contains(e.target);
+      if (!fromGrab && (sh.scrollTop > 0 || e.target.closest("input,textarea,select,button,a,label,[contenteditable],.chart,table,.nu-scan"))) return;
+      start = { y: e.clientY, x: e.clientX, id: e.pointerId, fromGrab }; hist = [{ y: e.clientY, t: e.timeStamp }]; dragging = false;
+    };
+    const onMove = e => {
+      if (!start || e.pointerId !== start.id) return;
+      const dy = e.clientY - start.y, dx = e.clientX - start.x;
+      if (!dragging) {
+        if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) { start = null; return; }        // horizontal: not ours
+        if (dy < 10 && !(start.fromGrab && dy < -10)) return;                                   // ~10px before committing
+        if (!start.fromGrab && sh.scrollTop > 0) { start = null; return; }
+        dragging = true; sh.setPointerCapture(e.pointerId); sh.style.transition = "none";
+      }
+      e.preventDefault();
+      hist.push({ y: e.clientY, t: e.timeStamp }); if (hist.length > 6) hist.shift();
+      const off = dy >= 0 ? dy : rubber(dy, sh.offsetHeight);                                   // pulls up resist like a rubber band
+      sh.style.transform = `translateY(${off}px)`;                                              // 1:1 with the finger
+      bg.style.backgroundColor = `color-mix(in srgb, var(--scrim) ${Math.max(0, 100 - dy / sh.offsetHeight * 100)}%, transparent)`;
+    };
+    const onUp = e => {
+      if (!start || e.pointerId !== start.id) return;
+      const was = dragging; start = null; dragging = false; if (!was) return;
+      const a = hist[0], b = hist[hist.length - 1], v = b.t > a.t ? (b.y - a.y) / (b.t - a.t) * 1000 : 0;   // px/s
+      const cur = new DOMMatrix(getComputedStyle(sh).transform).m42, h = sh.offsetHeight;
+      const landing = cur + project(v);
+      bg.style.backgroundColor = "";
+      if (landing > h * 0.45 || v > 1200) {                                                     // throw it away
+        sh.style.transition = `transform ${Math.max(.18, Math.min(.35, (h - cur) / Math.max(800, v)))}s cubic-bezier(.2,.8,.2,1)`;
+        sh.style.transform = `translateY(${h + 40}px)`; bg.style.backgroundColor = "transparent";
+        setTimeout(() => { const c = closeOf(sh); if (c && document.body.contains(c)) c.click(); else bg.remove(); }, 220);
+      } else {                                                                                  // settle back; it was thrown, so a little bounce
+        sh.style.transition = `transform var(--spring-bounce-t) var(--spring-bounce)`; sh.style.transform = "translateY(0)";
+        setTimeout(() => { sh.style.transition = ""; sh.style.transform = ""; }, 420);
+      }
+    };
+    sh.addEventListener("pointerdown", onDown);
+    sh.addEventListener("pointermove", onMove, { passive: false });
+    sh.addEventListener("pointerup", onUp); sh.addEventListener("pointercancel", onUp);
+  }
+  new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) {
+    if (n.nodeType !== 1) continue;
+    if (n.classList?.contains("sheet-bg")) enhance(n); else n.querySelectorAll?.(".sheet-bg").forEach(enhance);
+  } }).observe(document.body, { childList: true, subtree: true });
+
+  // collapse the large title once content scrolls under the glass bar
+  const hdr = document.querySelector("header.top");
+  if (hdr) { let on = false; addEventListener("scroll", () => { const c = scrollY > 40; if (c !== on) { on = c; hdr.classList.toggle("compact", c); } }, { passive: true }); }
+  // keep the browser chrome matching the theme
+  const tc = () => { const dark = document.documentElement.dataset.theme === "dark" || (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+    document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.setAttribute("content", dark ? "#000000" : "#F2F2F7")); };
+  tc(); matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", tc);
+})();
 </script>
 <script src="foods.js"></script>
 <script src="nutrition.js"></script>
