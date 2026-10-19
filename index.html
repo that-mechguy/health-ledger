@@ -407,6 +407,30 @@ header.top.compact .brand h1{font-size:1.06rem;letter-spacing:-.017em}
 header.top.compact .brand .sub{display:none}
 header.top.compact .refresh{width:30px;height:30px}
 @media (prefers-reduced-motion:reduce){.brand h1{transition:none}}
+
+/* 3D body model */
+.b3-wrap{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:18px;align-items:start}
+.b3-stage{position:relative;height:520px;border-radius:18px;background:radial-gradient(120% 80% at 50% 30%,var(--surface) 0%,var(--fill) 100%);overflow:hidden;touch-action:pan-y;cursor:grab;user-select:none;-webkit-user-select:none}
+.b3-stage:active{cursor:grabbing}
+.b3-stage canvas{display:block;width:100%!important;height:100%!important}
+.b3-load{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:.9rem;padding:20px;text-align:center}
+.b3-seg{display:flex;background:var(--fill);border-radius:10px;padding:2px;gap:2px;margin-bottom:14px}
+.b3-seg button{flex:1;border:0;background:transparent;border-radius:8px;padding:7px 4px;font-size:.8rem;font-weight:600;color:var(--ink-2);transition:background .2s,color .2s}
+.b3-seg button[aria-selected=true]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.b3-row{display:grid;grid-template-columns:14px 1fr auto;grid-template-rows:auto auto;column-gap:10px;align-items:center;width:100%;text-align:left;border:0;background:transparent;padding:10px 8px;border-radius:12px;color:var(--ink)}
+.b3-row+.b3-row{border-top:1px solid var(--line)}
+.b3-row.on{background:var(--fill)}
+.b3-row .n{font-weight:600}.b3-row .v{font-weight:600}
+.b3-row .p{grid-column:2/4;font-size:.78rem;color:var(--muted)}
+.b3-sw{width:14px;height:14px;border-radius:50%;grid-row:1/3}
+.b3-legend{display:flex;align-items:center;gap:8px;font-size:.72rem;color:var(--muted);margin-top:10px}
+.b3-legend i{flex:1;height:6px;border-radius:3px;background:linear-gradient(90deg,#34C759,#FFCC00 40%,#FF9500 70%,#FF3B30)}
+.b3-big{font-size:1rem;margin:4px 0 8px}.b3-big b{font-size:1.6rem;font-family:var(--f-display)}
+.b3-split{display:flex;height:10px;border-radius:5px;overflow:hidden;gap:2px;margin-bottom:8px}
+.b3-cap{position:absolute;left:0;right:0;bottom:12px;height:1.2em;pointer-events:none;font-size:.8rem;font-weight:600;color:var(--ink-2)}
+.b3-cap:empty{display:none}
+.b3-cap span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+@media (max-width:760px){.b3-wrap{grid-template-columns:1fr}.b3-stage{height:420px}}
 </style>
 </head>
 <body>
@@ -504,6 +528,7 @@ header.top.compact .refresh{width:30px;height:30px}
   <!-- BODY -->
   <section class="view" id="v-body" hidden>
     <div class="card" id="bodyHero"></div>
+    <div class="card b3-card"><div class="card-h"><h2>Body model</h2><span class="hint">Shaped from your latest scan</span></div><div id="b3d"></div></div>
     <div class="card"><div class="card-h"><h2>Body composition</h2><span class="hint" id="bodyDate"></span></div><div class="tiles" id="bodyTiles"></div></div>
     <div class="card"><div class="card-h"><h2>Weight over time</h2><span class="hint">Scale readings from scans and Apple Health; self-reported from lab forms</span></div><div class="chart" id="wtChart"></div><div class="row small muted" id="wtLegend" style="margin-top:8px"></div></div>
     <div class="card"><div class="card-h"><h2>Scan history</h2><span class="hint">Each body scan you upload adds a column</span></div><div class="tbl-wrap"><table class="mx" id="bodyMx"></table></div></div>
@@ -1098,6 +1123,7 @@ function renderBody(){
   $("#wtLegend").innerHTML = [has("scan") && `<span class="row" style="gap:6px"><span class="dot" style="background:var(--accent)"></span>Body scan (measured)</span>`,
     has("hk") && `<span class="row" style="gap:6px"><span class="dot" style="background:var(--ok)"></span>Apple Health / logged</span>`,
     has("self") && `<span class="row" style="gap:6px"><span class="dot" style="border:2px solid var(--ink-2);background:var(--surface)"></span>Self-reported on lab forms</span>`].filter(Boolean).join("");
+  renderBody3D();
 }
 
 /* ---------- render: activity ---------- */
@@ -1498,6 +1524,8 @@ async function claudeCall(content, { maxTokens = 2000 } = {}){
       body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: maxTokens, messages: [{ role: "user", content }] }) });
   } catch (e) { throw { code: "network", message: "Couldn't reach Claude. Check your internet connection." }; }
   const j = await res.json().catch(() => ({}));
+  if (!res.ok && /credit balance/i.test(j?.error?.message || "")) throw { code: "no_credit", message: "Your Claude API credit has run out, so AI estimates are paused. Top up at console.anthropic.com → Settings → Billing (the API key stays the same). Meanwhile, search the food list above or use + Add manually." };
+  if (!res.ok && res.status === 529) throw { code: "api_529", message: "Claude is busy right now. Try again in a minute." };
   if (!res.ok) throw { code: "api_" + res.status, message: res.status === 401 ? "Claude rejected the API key. Check it in Settings." : res.status === 429 ? "Claude is rate-limiting this key. Wait a minute and try again." : (j?.error?.message || "Claude API error " + res.status) };
   if (j.stop_reason === "max_tokens") j.truncated = true;
   return { text: (j.content || []).filter(b => b.type === "text").map(b => b.text).join(""), truncated: !!j.truncated };
@@ -2554,6 +2582,377 @@ async function loadMarkerInfo(){
   const { data, error } = await SB.from("marker_info").select("key,info");
   if (error) { S.mInfo = S.mInfo || {}; return; } // table not created yet: built-in explanations still work
   S.mInfo = Object.fromEntries((data || []).map(r => [r.key, r.info]));
+}
+
+/* ================= Body scan → lifelike 3D mannequin (three.js, loaded only when the Body tab opens) ================= */
+const B3 = { three: null, loading: null, st: null, cache: {} };
+const THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+const loadThree = () => B3.three ? Promise.resolve(B3.three) : (B3.loading ||= import(THREE_URL).then(m => (B3.three = m)));
+
+function bodyNums(scan){
+  const bp = Object.fromEntries((scan?.params || []).map(p => [p.key, p]));
+  const v = k => bp[k] ? numVal(bp[k].value) : null;
+  const pctStd = k => { const m = String(bp[k]?.ref || "").match(/(\d+(?:\.\d+)?)\s*%/); return m ? +m[1] : null; };
+  const w = v("weight"), bmi = v("bmi");
+  let h = w && bmi ? Math.sqrt(w / bmi) * 100 : null;
+  if (!h) { const m = String(S.settings?.about || "").match(/(1[4-9]\d|2[0-2]\d)\s*cm/); h = m ? +m[1] : 175; }
+  return { bp, h, w, bmi, bfr: v("bfr"), fat: v("fat_mass"), ffm: v("ffm"), skm: v("skm"), visceral: v("visceral"), whr: v("whr"), target: v("target_weight"),
+    trunk: v("seg_fat_trunk"), arms: v("seg_fat_arms"), legs: v("seg_fat_legs"), trunkPct: pctStd("seg_fat_trunk"), armsPct: pctStd("seg_fat_arms"), legsPct: pctStd("seg_fat_legs") };
+}
+const HEAT = [[0, "#34C759"], [.4, "#FFCC00"], [.7, "#FF9500"], [1, "#FF3B30"]];
+function fatColor(T, pct){
+  const c = new T.Color(); const x = pct == null ? .3 : Math.max(0, Math.min(1, (pct - 100) / 250));
+  for (let i = 1; i < HEAT.length; i++) if (x <= HEAT[i][0]) { const [a, ca] = HEAT[i - 1], [b2, cb] = HEAT[i]; return c.set(ca).lerp(new T.Color(cb), (x - a) / (b2 - a)); }
+  return c.set("#FF3B30");
+}
+
+/* ---- body shape parameters from the scan ---- */
+function shapeParams(n, variant){
+  const cl = (x, a, b) => Math.max(a, Math.min(b, x));
+  const s = (n.h || 175) / 176;
+  const ffmi = n.ffm && n.h ? n.ffm / Math.pow(n.h / 100, 2) : 18.5;
+  const mu = cl(ffmi / 18.5, .88, 1.25);
+  const fb = n.bfr != null ? cl((n.bfr - 15) / 20, 0, 1.3) : .3;   // fallback when there is no segmental data
+  let fT = n.trunkPct ? cl((n.trunkPct - 100) / 300, 0, 1.3) : fb;
+  let fA = n.armsPct ? cl((n.armsPct - 100) / 300, 0, 1.3) : fb * .8;
+  let fL = n.legsPct ? cl((n.legsPct - 100) / 300, 0, 1.3) : fb * .7;
+  let vis = cl(((n.visceral ?? 8) - 6) / 12, 0, 1);
+  if (variant === "lean") { fT = fA = fL = 0; vis = 0; }
+  if (variant === "target" && n.target && n.w && n.fat) {
+    const r = cl((n.fat - (n.w - n.target)) / n.fat, .15, 1);   // assume the loss is fat
+    const sc = p => p ? cl((p * r - 100) / 300, 0, 1.3) : 0;
+    fT = n.trunkPct ? sc(n.trunkPct) : fT * r; fA = n.armsPct ? sc(n.armsPct) : fA * r; fL = n.legsPct ? sc(n.legsPct) : fL * r; vis = Math.min(vis, .1);
+  }
+  return { s, mu, fT, fA, fL, vis };
+}
+
+/* ---- signed-distance mannequin: smooth-blended ellipsoids and tapered capsules ---- */
+function smin(a, b, k){ const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * .25; }
+function makeSDF(P){
+  const { s, mu } = P, sm = Math.sqrt(mu);
+  const E = (cx, cy, cz, rx, ry, rz, m) => ({ t: 0, m, cx: cx * s, cy: cy * s, cz: cz * s, rx: rx * s, ry: ry * s, rz: rz * s });
+  const C = (ax, ay, az, bx, by, bz, r1, r2, m) => {
+    const a = [ax * s, ay * s, az * s], b = [bx * s, by * s, bz * s], ba = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const l2 = ba[0] * ba[0] + ba[1] * ba[1] + ba[2] * ba[2], rr = (r1 - r2) * s;
+    return { t: 1, m, a, ba, l2, rr, a2: l2 - rr * rr, il2: 1 / l2, r1: r1 * s, r2: r2 * s };
+  };
+  const { fT, fA, fL, vis } = P;
+  const cw = 1 + .1 * fT, cd = 1 + .16 * fT, aw = 1 + .26 * fT, ad = 1 + .38 * fT, hw = 1 + .12 * fT;
+  const am = sm * (1 + .2 * fA), lm = sm * (1 + .16 * fL), sh = .97 + .1 * (mu - 1);
+  const head = [E(0, 1.655, -.008, .073, .1, .09), E(0, 1.585, .022, .057, .066, .066), C(0, 1.42, -.014, 0, 1.57, 0, .066 * (1 + .1 * fT), .055, 0)];
+  const trunk = [
+    E(0, 1.3, -.006, .15 * cw * sh, .165, .104 * cd),                        // rib cage
+    C(0, 1.455, -.022, .19 * sh, 1.435, -.024, .055, .05, 1),                // shoulder girdle
+    C(0, 1.5, -.035, .13 * sh, 1.455, -.035, .045, .032, 1),                 // trapezius
+    E(0, 1.335, .03, .145 * sh, .07, .078 * (1 + .25 * fT)),                 // chest plate
+    E(.068, 1.34, .05, .078, .05, .04 * (1 + .25 * fT), 1),                  // pectorals
+    E(.105 * sh, 1.25, -.03, .062, .12, .07, 1),                             // lats
+    E(0, 1.13, -.004, .13 * aw, .15, .098 * ad),                             // abdomen
+    E(0, 1.105, .015 + .03 * fT + .015 * vis, .118 * (.8 + .35 * fT), .14 + .01 * fT, .078 * (.55 + .5 * fT + .25 * vis)),   // belly
+    E(.118 * (1 + .05 * fT), 1.04, -.012, .042 * (.4 + .6 * fT), .065, .058 * (.6 + .4 * fT), 1),   // flanks
+    E(0, .955, -.01, .138 * hw, .1, .098),                                    // pelvis
+    E(.066, .905, -.055, .072 * (1 + .12 * fL), .088, .068 * (1 + .18 * fL), 1)  // glutes
+  ];
+  const arm = [
+    E(.212 * sh, 1.41, -.014, .058 * am, .072, .062 * am),
+    C(.222 * sh, 1.4, -.018, .252 * sh, 1.13, -.024, .046 * am, .036 * am),
+    E(.252 * sh, 1.055, -.01, .038 * am, .075, .04 * am),
+    C(.252 * sh, 1.13, -.024, .284 * sh, .885, .004, .037 * am, .026 * sqrt1(am)),
+    E(.295 * sh, .8, .016, .023, .074, .044), C(.29 * sh, .858, .036, .284 * sh, .806, .06, .013, .011)
+  ];
+  const leg = [
+    C(.086, .93, -.006, .095, .52, 0, .088 * lm, .055 * sqrt1(lm)),
+    E(.095, .73, .022, .062 * lm, .16, .058 * lm),
+    E(.095, .5, .012, .051, .056, .049),
+    C(.095, .49, -.006, .093, .1, -.015, .052 * sqrt1(lm), .032),
+    E(.097, .375, -.028, .048 * lm, .1, .05 * lm),
+    E(.093, .075, -.02, .034, .04, .036),
+    C(.093, .042, -.035, .102, .022, .145, .038, .026)
+  ];
+  function sqrt1(x){ return Math.sqrt(x); }
+  const prim = (p, x, y, z) => {
+    if (p.t === 0) {
+      const X = (x - p.cx) / p.rx, Y = (y - p.cy) / p.ry, Z = (z - p.cz) / p.rz, k0 = Math.sqrt(X * X + Y * Y + Z * Z);
+      const X2 = X / p.rx, Y2 = Y / p.ry, Z2 = Z / p.rz, k1 = Math.sqrt(X2 * X2 + Y2 * Y2 + Z2 * Z2);
+      return k1 > 1e-9 ? k0 * (k0 - 1) / k1 : -Math.min(p.rx, p.ry, p.rz);
+    }
+    const px = x - p.a[0], py = y - p.a[1], pz = z - p.a[2], ba = p.ba, l2 = p.l2;
+    const yy = px * ba[0] + py * ba[1] + pz * ba[2], zz = yy - l2;
+    const qx = px * l2 - ba[0] * yy, qy = py * l2 - ba[1] * yy, qz = pz * l2 - ba[2] * yy, x2 = qx * qx + qy * qy + qz * qz;
+    const y2 = yy * yy * l2, z2 = zz * zz * l2, k = Math.sign(p.rr) * p.rr * p.rr * x2;
+    if (Math.sign(zz) * p.a2 * z2 > k) return Math.sqrt(x2 + z2) * p.il2 - p.r2;
+    if (Math.sign(yy) * p.a2 * y2 < k) return Math.sqrt(x2 + y2) * p.il2 - p.r1;
+    return (Math.sqrt(x2 * p.a2 * p.il2) + yy * p.rr) * p.il2 - p.r1;
+  };
+  const grp = (L, k, x, ax, y, z) => { let d = 1e9; for (const p of L) d = smin(d, prim(p, p.m ? ax : x, y, z), k); return d; };
+  const kT = .07 * s, kH = .03 * s, kA = .022 * s, kL = .03 * s;
+  const f = (x, y, z, reg) => {
+    const ax = Math.abs(x);
+    const dh = grp(head, kH, x, ax, y, z), dt = grp(trunk, kT, x, ax, y, z), da = grp(arm, kA, ax, ax, y, z), dl = grp(leg, kL, ax, ax, y, z);
+    if (reg) { reg[0] = dh; reg[1] = dt; reg[2] = da; reg[3] = dl; }
+    return smin(smin(smin(dt, dh, .035 * s), da, .026 * s), dl, .04 * s);
+  };
+  const W = (.42 + .03 * fA) * s;
+  return { f, b0: [-W, -.006 * s, -.2 * s], b1: [W, 1.775 * s, (.27 + .06 * fT) * s] };
+}
+function makeOrgans(P){   // visceral fat cluster inside the abdomen
+  const s = P.s, g = .7 + .55 * P.vis + .15 * P.fT;
+  const L = [[0, 1.09, .012, .085, .06, .055], [-.048, 1.035, .02, .06, .05, .05], [.048, 1.035, .02, .06, .05, .05], [0, 1.0, .028, .07, .045, .05], [0, 1.14, -.005, .075, .035, .05]]
+    .map(([x, y, z, a, b, c]) => [x * s, y * s, (z + .02 * P.fT) * s, a * s * g, b * s * g, c * s * g]);
+  const f = (x, y, z) => { let d = 1e9; for (const [cx, cy, cz, rx, ry, rz] of L) { const X = (x - cx) / rx, Y = (y - cy) / ry, Z = (z - cz) / rz, k0 = Math.hypot(X, Y, Z), k1 = Math.hypot(X / rx, Y / ry, Z / rz); d = smin(d, k0 * (k0 - 1) / k1, .045 * s); } return d; };
+  return { f, b0: [-.2 * s, .9 * s, -.12 * s], b1: [.2 * s, 1.25 * s, .2 * s] };
+}
+
+/* ---- surface nets: SDF → smooth triangle mesh ---- */
+function polygonize(sdf, cs){
+  const { f, b0, b1 } = sdf;
+  const nx = Math.ceil((b1[0] - b0[0]) / cs) + 1, ny = Math.ceil((b1[1] - b0[1]) / cs) + 1, nz = Math.ceil((b1[2] - b0[2]) / cs) + 1;
+  const V = new Float32Array(nx * ny * nz), id = (i, j, k) => i + nx * (j + ny * k);
+  const B = 8, rB = Math.sqrt(3) * B * cs * .5;
+  for (let k0 = 0; k0 < nz; k0 += B) for (let j0 = 0; j0 < ny; j0 += B) for (let i0 = 0; i0 < nx; i0 += B) {
+    const i1 = Math.min(nx, i0 + B), j1 = Math.min(ny, j0 + B), k1 = Math.min(nz, k0 + B);
+    const dc = f(b0[0] + (i0 + i1 - 1) * .5 * cs, b0[1] + (j0 + j1 - 1) * .5 * cs, b0[2] + (k0 + k1 - 1) * .5 * cs);
+    const far = Math.abs(dc) > rB * 1.6 + cs * 2;
+    for (let k = k0; k < k1; k++) for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++)
+      V[id(i, j, k)] = far ? dc : f(b0[0] + i * cs, b0[1] + j * cs, b0[2] + k * cs);
+  }
+  const cx = nx - 1, cy = ny - 1, cz = nz - 1, cell = new Int32Array(cx * cy * cz).fill(-1), cid = (i, j, k) => i + cx * (j + cy * k);
+  const pos = [], O = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
+  const EG = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]], v = new Float32Array(8);
+  for (let k = 0; k < cz; k++) for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) {
+    let m = 0; for (let c = 0; c < 8; c++) { v[c] = V[id(i + O[c][0], j + O[c][1], k + O[c][2])]; if (v[c] < 0) m |= 1 << c; }
+    if (m === 0 || m === 255) continue;
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    for (const [a, b] of EG) { if ((v[a] < 0) === (v[b] < 0)) continue; const t = v[a] / (v[a] - v[b]); sx += O[a][0] + (O[b][0] - O[a][0]) * t; sy += O[a][1] + (O[b][1] - O[a][1]) * t; sz += O[a][2] + (O[b][2] - O[a][2]) * t; n++; }
+    cell[cid(i, j, k)] = pos.length / 3; pos.push(b0[0] + (i + sx / n) * cs, b0[1] + (j + sy / n) * cs, b0[2] + (k + sz / n) * cs);
+  }
+  const idx = [];
+  const quad = (a, b, c, d, flip) => { if (a < 0 || b < 0 || c < 0 || d < 0) return; flip ? idx.push(a, c, b, a, d, c) : idx.push(a, b, c, a, c, d); };
+  for (let k = 0; k < nz - 1; k++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    const s0 = V[id(i, j, k)] < 0;
+    if (j > 0 && k > 0 && (V[id(i + 1, j, k)] < 0) !== s0) quad(cell[cid(i, j - 1, k - 1)], cell[cid(i, j, k - 1)], cell[cid(i, j, k)], cell[cid(i, j - 1, k)], s0);
+    if (i > 0 && k > 0 && (V[id(i, j + 1, k)] < 0) !== s0) quad(cell[cid(i - 1, j, k - 1)], cell[cid(i - 1, j, k)], cell[cid(i, j, k)], cell[cid(i, j, k - 1)], s0);
+    if (i > 0 && j > 0 && (V[id(i, j, k + 1)] < 0) !== s0) quad(cell[cid(i - 1, j - 1, k)], cell[cid(i, j - 1, k)], cell[cid(i, j, k)], cell[cid(i - 1, j, k)], s0);
+  }
+  // normals from the SDF gradient, region weights for colouring
+  const nv = pos.length / 3, nor = new Float32Array(nv * 3), reg = new Float32Array(nv * 4), r4 = [0, 0, 0, 0], e = cs * .5;
+  for (let q = 0; q < nv; q++) {
+    const x = pos[q * 3], y = pos[q * 3 + 1], z = pos[q * 3 + 2];
+    let gx = f(x + e, y, z) - f(x - e, y, z), gy = f(x, y + e, z) - f(x, y - e, z), gz = f(x, y, z + e) - f(x, y, z - e);
+    const l = Math.hypot(gx, gy, gz) || 1; nor[q * 3] = gx / l; nor[q * 3 + 1] = gy / l; nor[q * 3 + 2] = gz / l;
+    f(x, y, z, r4); const mn = Math.min(...r4); let tot = 0;
+    for (let r = 0; r < 4; r++) { const w = Math.exp(-(r4[r] - mn) / (.012)); reg[q * 4 + r] = w; tot += w; }
+    for (let r = 0; r < 4; r++) reg[q * 4 + r] /= tot;
+  }
+  // make the winding agree with the outward normals
+  let agree = 0;
+  for (let t = 0; t < idx.length; t += 3 * Math.max(1, Math.floor(idx.length / 3 / 400))) {
+    const [a, b, c] = [idx[t], idx[t + 1], idx[t + 2]];
+    const ux = pos[b * 3] - pos[a * 3], uy = pos[b * 3 + 1] - pos[a * 3 + 1], uz = pos[b * 3 + 2] - pos[a * 3 + 2];
+    const wx = pos[c * 3] - pos[a * 3], wy = pos[c * 3 + 1] - pos[a * 3 + 1], wz = pos[c * 3 + 2] - pos[a * 3 + 2];
+    agree += (uy * wz - uz * wy) * nor[a * 3] + (uz * wx - ux * wz) * nor[a * 3 + 1] + (ux * wy - uy * wx) * nor[a * 3 + 2];
+  }
+  if (agree < 0) for (let t = 0; t < idx.length; t += 3) { const tmp = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = tmp; }
+  return { pos: new Float32Array(pos), nor, reg, idx: nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) };
+}
+function meshGeo(T, m){
+  const g = new T.BufferGeometry();
+  g.setAttribute("position", new T.BufferAttribute(m.pos, 3)); g.setAttribute("normal", new T.BufferAttribute(m.nor, 3));
+  g.setAttribute("color", new T.BufferAttribute(new Float32Array(m.pos.length), 3)); g.setIndex(new T.BufferAttribute(m.idx, 1));
+  g.userData.reg = m.reg; g.computeBoundingSphere(); return g;
+}
+function bodyGeo(T, n, variant){
+  const key = (B3.idx ?? 0) + ":" + variant;
+  if (B3.cache[key]) return B3.cache[key];
+  const P = shapeParams(n, variant);
+  return (B3.cache[key] = meshGeo(T, polygonize(makeSDF(P), .0072 * P.s)));
+}
+function paint(T, geo, cols, base, sel){   // cols: [head, trunk, arms, legs] colours; others fade to base when one region is selected
+  const reg = geo.userData.reg, c = geo.attributes.color.array, keys = ["head", "trunk", "arms", "legs"];
+  const cc = cols.map((col, r) => (sel && keys[r] !== sel ? base : col));
+  for (let q = 0; q < reg.length / 4; q++) {
+    let R = 0, G = 0, Bc = 0; for (let r = 0; r < 4; r++) { const w = reg[q * 4 + r]; R += cc[r].r * w; G += cc[r].g * w; Bc += cc[r].b * w; }
+    c[q * 3] = R; c[q * 3 + 1] = G; c[q * 3 + 2] = Bc;
+  }
+  geo.attributes.color.needsUpdate = true;
+}
+const domRegion = (geo, vi) => { const r = geo.userData.reg; let b = 0; for (let k = 1; k < 4; k++) if (r[vi * 4 + k] > r[vi * 4 + b]) b = k; return ["head", "trunk", "arms", "legs"][b]; };
+
+/* ---- UI ---- */
+function renderBody3D(){
+  const host = $("#b3d"); if (!host || $("#v-body").hidden) return;
+  const scans = (D?.body || []).filter(s => (s.params || []).length);
+  if (!scans.length) { host.innerHTML = `<div class="empty">Upload a body scan to see your 3D body model.</div>`; return; }
+  B3.idx = Math.min(B3.idx ?? scans.length - 1, scans.length - 1);
+  B3.layer = B3.layer || "fat";
+  if (!host.dataset.ready) {
+    host.dataset.ready = "1";
+    host.innerHTML = `<div class="b3-wrap"><div class="b3-stage" id="b3Stage" aria-label="3D body model. Drag to rotate, tap a body part for details." role="img"><div class="b3-load">Loading 3D model…</div></div>
+      <div class="b3-side"><div class="b3-seg" role="tablist" id="b3Layers">
+        <button data-l="fat" role="tab">Fat map</button><button data-l="lean" role="tab">Fat vs lean</button><button data-l="visceral" role="tab">Visceral</button><button data-l="target" role="tab">Target</button></div>
+        <div id="b3Info"></div>
+        <div id="b3Scan"></div>
+        <div class="small muted" style="margin-top:8px">Drag to turn · tap a body part · pinch or scroll to zoom. A model shaped from your scan's measurements, not a 3D photo.</div></div></div>`;
+    $("#b3Layers").onclick = e => { const b = e.target.closest("[data-l]"); if (!b) return; B3.layer = b.dataset.l; B3.sel = null; updateB3(); };
+    loadThree().then(() => initB3()).catch(() => { const st = $("#b3Stage"); if (st) st.innerHTML = `<div class="b3-load">Couldn't load the 3D engine. Check your connection and reopen this tab.</div>`; });
+  } else if (B3.st) updateB3();
+}
+
+function studioEnv(T, renderer){
+  const env = new T.Scene();
+  env.add(new T.Mesh(new T.BoxGeometry(12, 8, 12), new T.MeshBasicMaterial({ color: 0x26282c, side: T.BackSide })));
+  const box = (w, h, x, y, z, k) => { const m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ color: new T.Color(k, k, k), side: T.DoubleSide })); m.position.set(x, y, z); m.lookAt(0, 1, 0); env.add(m); };
+  box(5, 3, 0, 3.8, 2.5, 1.6);   // overhead front softbox
+  box(2, 5, -5, 2, 1, 1.8);   // left strip
+  box(2, 5, 5, 2, -1.5, .5);  // right strip
+  box(6, 1.2, 0, 1, -5.5, 2.2); // rim from behind
+  const pm = new T.PMREMGenerator(renderer), tex = pm.fromScene(env, .035).texture; pm.dispose(); return tex;
+}
+
+function initB3(){
+  const T = B3.three, stage = $("#b3Stage"); if (!stage) return;
+  stage.innerHTML = `<div class="b3-load" id="b3Busy">Shaping your model…</div><div class="b3-cap" id="b3Cap"></div>`;
+  const renderer = new T.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1)); renderer.outputColorSpace = T.SRGBColorSpace;
+  renderer.toneMapping = T.NoToneMapping;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+  stage.prepend(renderer.domElement);
+  const scene = new T.Scene(), cam = new T.PerspectiveCamera(26, 1, .1, 50);
+  scene.environment = studioEnv(T, renderer);
+  const key = new T.DirectionalLight(0xffffff, 2.2); key.position.set(2.6, 3.6, 2.2); key.castShadow = true;
+  key.shadow.mapSize.set(1024, 1024); Object.assign(key.shadow.camera, { left: -1.2, right: 1.2, top: 2.2, bottom: -.2, near: .5, far: 9 }); key.shadow.bias = -.0004; key.shadow.normalBias = .02;
+  scene.add(key, new T.AmbientLight(0xffffff, .15));
+  const st = B3.st = { T, renderer, scene, cam, stage, rotY: .45, rotX: 0, vY: 0, zoom: 1, dragging: false, idle: true, last: performance.now(), visible: true, raf: 0, figs: [] };
+  const ray = new T.Raycaster(), ndc = new T.Vector2();
+  const fit = () => { const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return; renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix(); draw(); };
+  new ResizeObserver(fit).observe(stage);
+  let down = null, hist = [];
+  stage.addEventListener("pointerdown", e => { down = { x: e.clientX, y: e.clientY, rotY: st.rotY, rotX: st.rotX, moved: false, id: e.pointerId }; hist = [{ x: e.clientX, t: e.timeStamp }]; st.vY = 0; st.idle = false; stage.setPointerCapture(e.pointerId); kick(); });
+  stage.addEventListener("pointermove", e => {
+    if (!down || e.pointerId !== down.id) return;
+    const dx = e.clientX - down.x, dy = e.clientY - down.y;
+    if (!down.moved && Math.hypot(dx, dy) < 8) return;
+    down.moved = true; st.dragging = true;
+    st.rotY = down.rotY + dx * .012;
+    const tilt = down.rotX + dy * .004, lim = .25, over = Math.abs(tilt) - lim;
+    st.rotX = over > 0 ? Math.sign(tilt) * (lim + over * .55 / (1 + over * 2.2)) : tilt;   // rubber band past the limit
+    hist.push({ x: e.clientX, t: e.timeStamp }); if (hist.length > 6) hist.shift(); kick();
+  });
+  const up = e => {
+    if (!down || e.pointerId !== down.id) return;
+    if (!down.moved) pick(e); else { const a = hist[0], b = hist[hist.length - 1]; st.vY = b.t > a.t ? (b.x - a.x) / (b.t - a.t) * 12 : 0; }
+    down = null; st.dragging = false; kick();
+  };
+  stage.addEventListener("pointerup", up); stage.addEventListener("pointercancel", up);
+  stage.addEventListener("wheel", e => { e.preventDefault(); st.zoom = Math.max(.8, Math.min(2.2, st.zoom * Math.exp(-e.deltaY * .0015))); kick(); }, { passive: false });
+  let pinch = null; stage.addEventListener("touchmove", e => { if (e.touches.length !== 2) { pinch = null; return; } const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); if (pinch) st.zoom = Math.max(.8, Math.min(2.2, st.zoom * d / pinch)); pinch = d; kick(); }, { passive: true });
+  function pick(e){
+    const r = stage.getBoundingClientRect(); ndc.set((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
+    ray.setFromCamera(ndc, cam); const hit = ray.intersectObjects(st.figs.map(f => f.userData.pickable).filter(Boolean), false)[0];
+    const reg = hit ? domRegion(hit.object.geometry, hit.face.a) : null;
+    B3.sel = reg && reg !== "head" && reg !== B3.sel ? reg : null; updateB3(true);
+  }
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function frame(now){
+    st.raf = 0; const dt = Math.min(64, now - st.last); st.last = now;
+    let moving = st.dragging;
+    if (!st.dragging && Math.abs(st.vY) > .02) { st.rotY += st.vY * dt / 1000; st.vY *= Math.pow(.996, dt); moving = true; }
+    if (!st.dragging && Math.abs(st.rotX) > .25) { st.rotX += (Math.sign(st.rotX) * .25 - st.rotX) * Math.min(1, dt / 90); moving = true; }
+    if (st.idle && !reduce && st.visible) { st.rotY += dt * .00025; moving = true; }
+    if (st.pulse && !reduce) moving = true;
+    draw(now); if (moving && st.visible) kick();
+  }
+  function kick(){ if (!st.raf) st.raf = requestAnimationFrame(frame); }
+  function draw(now = performance.now()){
+    if (!st.figs.length) return;
+    for (const f of st.figs) { f.rotation.y = st.rotY; f.rotation.x = st.rotX * .5; }
+    const H = st.H || 1.76, two = st.figs.length > 1;
+    const vfov = Math.tan(T.MathUtils.degToRad(13)), hfov = vfov * cam.aspect;
+    const dist = Math.max(H * .6 / vfov, (two ? .52 : .3) * H / hfov) / st.zoom;
+    const ty = H * (.5 + (st.zoom - 1) * .18);
+    cam.position.set(0, ty + .1, dist); cam.lookAt(0, ty, 0);
+    if (st.pulse) { const k = 1 + .035 * Math.sin(now / 420); st.pulse.scale.setScalar(k); st.pulse.material.emissiveIntensity = .45 + .25 * (Math.sin(now / 420) + 1) / 2; }
+    renderer.render(scene, cam);
+    const cap = $("#b3Cap"); if (two && cap?.children.length === 2) st.figs.forEach((f, i) => { const v = f.position.clone().project(cam); cap.children[i].style.left = ((v.x + 1) / 2 * 100) + "%"; });
+  }
+  st.kick = kick; st.draw = draw;
+  new IntersectionObserver(es => { st.visible = es[0].isIntersecting; if (st.visible) kick(); }).observe(stage);
+  fit(); setTimeout(() => { updateB3(); fit(); }, 30);
+}
+
+function baseDisc(T, r){
+  const g = new T.Group();
+  const disc = new T.Mesh(new T.CylinderGeometry(r, r * 1.02, .022, 96), new T.MeshPhysicalMaterial({ color: 0xf2f2f4, roughness: .12, metalness: 0, clearcoat: 1, clearcoatRoughness: .08 }));
+  disc.position.y = .011; disc.receiveShadow = true; g.add(disc);
+  const rim = new T.Mesh(new T.TorusGeometry(r * 1.01, .004, 12, 96), new T.MeshStandardMaterial({ color: 0xbfc3ca, metalness: 1, roughness: .2 }));
+  rim.rotation.x = Math.PI / 2; rim.position.y = .022; g.add(rim);
+  return g;
+}
+
+function updateB3(){
+  const st = B3.st, T = st?.T; if (!st) return;
+  const scans = D.body.filter(s => (s.params || []).length), scan = scans[B3.idx] || scans[scans.length - 1], n = bodyNums(scan);
+  $("#b3Layers").querySelectorAll("[data-l]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.l === B3.layer)));
+  const L = B3.layer, sel = B3.sel, busy = $("#b3Busy");
+  const needs = { fat: ["now"], lean: ["now", "lean"], visceral: ["now"], target: ["now", "target"] }[L];
+  const cached = needs.every(v => B3.cache[(B3.idx ?? 0) + ":" + v]);
+  if (!cached && busy) busy.style.display = "";
+  setTimeout(() => {   // let the "shaping" note paint before the mesh is built
+    for (const f of st.figs) { st.scene.remove(f); f.traverse(o => { if (o.material) [].concat(o.material).forEach(m => m.dispose()); if (o.geometry && !o.geometry.userData.reg) o.geometry.dispose(); }); }
+    st.figs = []; st.pulse = null;
+    const P = shapeParams(n, "now"); st.H = 1.776 * P.s;
+    const pearl = new T.Color("#ECE9E4"), cool = new T.Color("#DCE6F5");
+    const skinMat = (extra = {}) => new T.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: .36, clearcoat: .45, clearcoatRoughness: .32, sheen: .25, sheenRoughness: .6, sheenColor: new T.Color(1, 1, 1), ...extra });
+    const fig = (geo, mat, x = 0) => { const g = new T.Group(); const m = new T.Mesh(geo, mat); m.position.y = .022; m.castShadow = true; m.receiveShadow = !mat.transparent; g.add(m); g.add(baseDisc(T, .3 * P.s)); g.position.x = x; g.userData.pickable = m; st.scene.add(g); st.figs.push(g); return g; };
+    const now = bodyGeo(T, n, "now");
+    const pct = { trunk: n.trunkPct, arms: n.armsPct, legs: n.legsPct };
+    const heat = ["head", "trunk", "arms", "legs"].map(k => k === "head" ? pearl : fatColor(T, pct[k]).lerp(pearl, .16));
+    if (L === "fat") { paint(T, now, heat, pearl, sel); fig(now, skinMat()); }
+    if (L === "lean") {
+      const lean = bodyGeo(T, n, "lean"); paint(T, lean, [pearl, ...[0, 0, 0].map(() => new T.Color("#C93A45"))], new T.Color("#B9A9A9"), sel);
+      paint(T, now, [0, 0, 0, 0].map(() => new T.Color("#F7DE8A")), new T.Color("#F7DE8A"));
+      const g = fig(lean, skinMat({ roughness: .45 }));
+      const shell = new T.Mesh(now, new T.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, transparent: true, opacity: .34, roughness: .08, clearcoat: 1, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+      shell.position.y = .022; shell.renderOrder = 2; g.add(shell);
+    }
+    if (L === "visceral") {
+      paint(T, now, [0, 0, 0, 0].map(() => new T.Color("#C9D3E0")), pearl);
+      const g = fig(now, new T.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, transparent: true, opacity: .3, roughness: .12, clearcoat: 1, depthWrite: false }));
+      g.userData.pickable.renderOrder = 2; g.userData.pickable.castShadow = false;
+      const ok = (n.visceral ?? 8) <= 10;
+      const og = B3.cache["org:" + (B3.idx ?? 0)] ||= meshGeo(T, polygonize(makeOrgans(P), .005 * P.s));
+      const org = new T.Mesh(og, new T.MeshPhysicalMaterial({ color: ok ? 0x34C759 : 0xFF9500, emissive: ok ? 0x1E7D3A : 0xFF5A00, emissiveIntensity: .5, roughness: .35, clearcoat: .6 }));
+      const piv = new T.Group(); piv.position.set(0, 1.07 * P.s + .022, .02); org.position.set(0, -1.07 * P.s, -.02); piv.add(org); g.add(piv); st.pulse = { scale: piv.scale, material: org.material };
+    }
+    if (L === "target") {
+      paint(T, now, [0, 0, 0, 0].map(() => pearl), pearl);
+      const tg = bodyGeo(T, n, "target"); paint(T, tg, [0, 0, 0, 0].map(() => cool), cool);
+      fig(now, skinMat(), -.42 * P.s); fig(tg, skinMat({ roughness: .3 }), .42 * P.s);
+    }
+    $("#b3Cap").innerHTML = L === "target" ? `<span>Now · ${n.w ? fmtN(n.w) + " kg" : "—"}</span><span>Target · ${n.target ? fmtN(n.target) + " kg" : "—"}</span>` : "";
+    if (busy) busy.style.display = "none";
+    st.draw(); st.kick();
+  }, cached ? 0 : 40);
+
+  const fmtKg = x => x == null ? "—" : fmtN(x) + " kg";
+  const segRow = (key, label, kg, p) => `<button class="b3-row${sel === key ? " on" : ""}" data-seg="${key}"><span class="b3-sw" style="background:#${fatColor(T, p).getHexString()}"></span><span class="n">${label}</span><span class="v mono">${fmtKg(kg)}</span><span class="p">${p ? Math.round(p) + "% of standard" : ""}</span></button>`;
+  const info = {
+    fat: `<div class="eyebrow">Fat by region</div>${segRow("trunk", "Trunk", n.trunk, n.trunkPct)}${segRow("arms", "Arms (L+R)", n.arms, n.armsPct)}${segRow("legs", "Legs (L+R)", n.legs, n.legsPct)}
+      <div class="b3-legend"><span>Standard</span><i></i><span>3.5× standard</span></div>`,
+    lean: `<div class="eyebrow">Fat vs lean</div><div class="b3-big"><b class="mono">${n.fat != null ? fmtN(n.fat) : "—"}</b> kg fat · <b class="mono">${n.ffm != null ? fmtN(n.ffm) : "—"}</b> kg lean</div>
+      <div class="b3-split"><i style="flex:${n.fat || 1};background:#F2D675"></i><i style="flex:${n.ffm || 2};background:#C93A45"></i></div>
+      <div class="small muted">Body fat ${n.bfr != null ? fmtN(n.bfr) + "%" : "—"} · skeletal muscle ${fmtKg(n.skm)}. Red = your lean body (muscle, organs, bone, water); the clear shell = the fat around it.</div>`,
+    visceral: `<div class="eyebrow">Visceral fat</div><div class="b3-big"><b class="mono">${n.visceral ?? "—"}</b> grade <span class="small muted">(healthy ≤ 10)</span></div>
+      <div class="small">${n.visceral > 10 ? "Above the healthy range. This is fat packed around the organs; it drives insulin resistance, triglycerides and fatty liver, and it is usually the first fat to go when you lose weight." : "In the healthy range."}${n.whr ? ` Waist-to-hip ratio ${fmtN(n.whr)} (healthy ≤ 0.95).` : ""}</div>`,
+    target: `<div class="eyebrow">You at the target weight</div><div class="b3-big"><b class="mono">${n.target ? fmtN(n.target) : "—"}</b> kg <span class="small muted">vs ${n.w ? fmtN(n.w) : "—"} kg now</span></div>
+      <div class="small">Right: the same frame and muscle at the scan's suggested target. ${n.target && n.w ? `About ${fmtN(n.w - n.target)} kg to lose, assuming it comes off as fat.` : ""}</div>`
+  };
+  let selTxt = "";
+  if (sel) { const kg = n[sel], p = n[sel + "Pct"]; selTxt = `<div class="notice" style="margin-top:10px"><b>${sel === "trunk" ? "Trunk" : sel === "arms" ? "Arms" : "Legs"}</b>: ${fmtKg(kg)} of fat${p ? `, ${Math.round(p)}% of the standard for your height and weight` : ""}.${sel === "trunk" ? " Trunk fat includes the visceral fat around your organs." : ""}</div>`; }
+  $("#b3Info").innerHTML = info[L] + (L === "fat" || L === "lean" ? selTxt : "");
+  $("#b3Info").querySelectorAll("[data-seg]").forEach(b => b.onclick = () => { B3.sel = B3.sel === b.dataset.seg ? null : b.dataset.seg; updateB3(); });
+  $("#b3Scan").innerHTML = scans.length > 1 ? `<div class="eyebrow" style="margin-top:12px">Scan</div><div class="row">${scans.map((s, i) => `<button class="pill-btn" data-scan="${i}" aria-pressed="${i === B3.idx}">${fmtShort(s.date)}</button>`).join("")}</div>` : `<div class="small muted" style="margin-top:10px">Scan of ${fmtD(scan.date)}. Each new scan you upload can be compared here.</div>`;
+  $("#b3Scan").querySelectorAll("[data-scan]").forEach(b => b.onclick = () => { B3.idx = +b.dataset.scan; B3.sel = null; updateB3(); });
 }
 
 /* ---- boot ---- */
