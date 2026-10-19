@@ -1524,7 +1524,7 @@ async function claudeCall(content, { maxTokens = 2000 } = {}){
       body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: maxTokens, messages: [{ role: "user", content }] }) });
   } catch (e) { throw { code: "network", message: "Couldn't reach Claude. Check your internet connection." }; }
   const j = await res.json().catch(() => ({}));
-  if (!res.ok && /credit balance/i.test(j?.error?.message || "")) throw { code: "no_credit", message: "Your Claude API credit has run out, so AI estimates are paused. Top up at console.anthropic.com → Settings → Billing (the API key stays the same). Meanwhile, search the food list above or use + Add manually." };
+  if (!res.ok && /credit balance/i.test(j?.error?.message || "")) throw { code: "no_credit", message: "Your Claude API credit has run out, so AI estimates are paused. Top up at console.anthropic.com → Settings → Billing, in the same account the key was created in. If you just topped up, wait a few minutes and try again. Meanwhile, enter it manually." };
   if (!res.ok && res.status === 529) throw { code: "api_529", message: "Claude is busy right now. Try again in a minute." };
   if (!res.ok) throw { code: "api_" + res.status, message: res.status === 401 ? "Claude rejected the API key. Check it in Settings." : res.status === 429 ? "Claude is rate-limiting this key. Wait a minute and try again." : (j?.error?.message || "Claude API error " + res.status) };
   if (j.stop_reason === "max_tokens") j.truncated = true;
