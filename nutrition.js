@@ -337,8 +337,9 @@ async function addEntries(list){
 }
 async function updateEntry(id, patch){
   const row = { name: patch.name, serving: patch.serving, kcal: r0(patch.kcal), protein_g: r1(patch.p), carbs_g: r1(patch.c), fat_g: r1(patch.f), sodium_mg: patch.na == null || patch.na === "" ? null : r0(patch.na), meal: patch.meal, day: patch.date };
-  const was = N.entries.find(x => x.id === id);
-  if (was?.micros?.length && was.kcal > 0 && r0(patch.kcal) !== r0(was.kcal)) { const k = patch.kcal / was.kcal; row.micros = patch.micros = was.micros.map(m => ({ ...m, amt: Math.round(m.amt * k * 1000) / 1000 })); }
+  const was = N.entries.find(x => x.id === id), userMi = patch.micros;
+  if (userMi) row.micros = userMi;
+  else if (was?.micros?.length && was.kcal > 0 && r0(patch.kcal) !== r0(was.kcal)) { const k = patch.kcal / was.kcal; row.micros = patch.micros = was.micros.map(m => ({ ...m, amt: Math.round(m.amt * k * 1000) / 1000 })); }
   const { error } = await sb().from("food_entries").update(row).eq("id", id);
   if (error) { toast("Couldn't save: " + error.message); throw error; }
   const i = N.entries.findIndex(x => x.id === id); if (i >= 0) N.entries[i] = { ...N.entries[i], ...patch }; NU.render();
@@ -358,6 +359,7 @@ function openEditEntry(x){
       <label>Date<input name="date" type="date" max="${N.today}" value="${x.date}"></label>
       <label>Scale everything ×<input name="scale" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 1.5"></label>
       <div class="full small muted">Scale multiplies calories, macros and sodium, e.g. ×1.5 if you had 150 g instead of 100 g.</div>
+      ${x.micros?.length || x.meal === "supplements" ? `<label class="full">Vitamins, minerals &amp; actives in this entry (one per line, e.g. Selenium: 40 mcg)<textarea name="micros" rows="5">${e2(microsText(x.micros))}</textarea></label>` : ""}
       <div class="full row" style="justify-content:space-between"><button type="button" class="btn" id="eeDel" style="color:var(--bad)">Delete</button><button class="btn primary" type="submit">Save</button></div>
     </form>`);
   const fm = bg.querySelector("#eeF");
@@ -365,6 +367,9 @@ function openEditEntry(x){
     for (const n of ["kcal", "p", "c", "f", "na"]) { const base = n === "na" ? x.na : x[n]; if (base != null && base !== "") fm.elements[n].value = n === "kcal" || n === "na" ? r0(base * k) : r1(base * k); } };
   fm.onsubmit = async ev => { ev.preventDefault(); const f = new FormData(fm);
     const patch = { name: String(f.get("name")).trim(), serving: String(f.get("serving") || ""), kcal: +f.get("kcal") || 0, p: +f.get("p") || 0, c: +f.get("c") || 0, f: +f.get("f") || 0, na: f.get("na") === "" ? null : +f.get("na"), meal: f.get("meal"), date: f.get("date") || x.date };
+    if (fm.elements.micros) { const sp = Object.fromEntries((x.micros || []).filter(m => m.spread).map(m => [m.n.toLowerCase(), m.spread]));
+      const mi = parseMicros(fm.elements.micros.value).map(m => sp[m.n.toLowerCase()] ? { ...m, spread: sp[m.n.toLowerCase()] } : m);
+      if (microsText(mi) !== microsText(x.micros)) patch.micros = mi; }
     try { await updateEntry(x.id, patch); toast("Saved"); bg.close(); } catch {} };
   bg.querySelector("#eeDel").onclick = async () => { await removeEntry(x.id); toast(`Removed ${x.name}`); bg.close(); };
 }
@@ -1198,9 +1203,33 @@ function openMicro(k){
     <p style="margin:4px 0"><b>Good vegetarian sources:</b> ${e2(m.src)}</p>
     ${m.note ? `<p style="margin:4px 0">${e2(m.note)}</p>` : ""}
     ${ln ? `<div class="notice" style="margin-top:8px">${e2(ln)}</div>` : ""}
+    ${unitSuspects(m).length ? `<div class="notice" style="margin-top:8px"><b>This looks like a unit mix-up.</b> ${unitSuspects(m).map(z => `${e2(z.name)} has ${e2(+(+z.x.amt).toFixed(3) + " " + z.x.unit)}`).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join("; ")}, which is far above any real supplement dose. Labels almost always mean micrograms (mcg) here.<div class="row" style="margin-top:8px"><button class="btn primary" id="miFixU">Change to mcg everywhere</button></div></div>` : ""}
     ${contrib.length ? `<div class="nu-sec">Where it came from</div><div class="nu-kv">${contrib.map(([nm, x]) => `<div>${e2(nm)}</div><div>${fmtMi(x)} ${m.u}</div>`).join("")}</div>` : ""}
     <p class="small muted" style="margin-top:10px">Targets: ICMR-NIN 2020 RDA for Indian men where available, otherwise US National Academies DRIs; upper limits from the National Academies. General guidance, not medical advice; follow your doctor's prescription for supplements.</p>`);
+  const fx = bg.querySelector("#miFixU");
+  if (fx) fx.onclick = async () => { fx.disabled = true; fx.textContent = "Fixing…";
+    try { await fixUnits(m); toast(`${m.n} corrected to mcg`); bg.close(); openMicro(k); } catch (e) { toast("Couldn't fix: " + (e.message || e)); fx.disabled = false; fx.textContent = "Change to mcg everywhere"; } };
   return bg;
+}
+// entries / saved supplements whose amount for this nutrient is impossible (≥ 20× the safe limit) because mg was saved for mcg
+function unitSuspects(m){
+  if (!m.ul || !/µg/.test(m.u)) return [];
+  const bad = x => { const mk = MIK[x.n] || microKey(x.n); if (!mk || mk.k !== m.k || !/^(mg|g)$/i.test(String(x.unit || "").trim())) return false; const v = microAmt(m, x.n, x.amt, x.unit); return v != null && v >= m.ul * 20; };
+  const out = [];
+  for (const e of N.entries) for (const x of e.micros || []) if (bad(x)) out.push({ kind: "e", id: e.id, name: e.name, x });
+  for (const sp of Object.values(N.supps)) for (const x of [...(sp.microsServing || []), ...(sp.micros || [])]) if (bad(x)) out.push({ kind: "s", id: sp.id, name: sp.name, x });
+  return out;
+}
+async function fixUnits(m){
+  const sus = unitSuspects(m), fixArr = a => (a || []).map(x => { const mk = MIK[x.n] || microKey(x.n); return mk && mk.k === m.k && /^(mg|g)$/i.test(String(x.unit || "").trim()) && microAmt(m, x.n, x.amt, x.unit) >= m.ul * 20 ? { ...x, unit: "µg" } : x; });
+  for (const id of [...new Set(sus.filter(z => z.kind === "e").map(z => z.id))]) {
+    const e = N.entries.find(x => x.id === id), micros = fixArr(e.micros);
+    const { error } = await sb().from("food_entries").update({ micros }).eq("id", id); if (error) throw error; e.micros = micros;
+  }
+  for (const id of [...new Set(sus.filter(z => z.kind === "s").map(z => z.id))]) {
+    const sp = N.supps[id]; await saveSupp({ ...sp, microsServing: fixArr(sp.microsServing || sp.micros), id });
+  }
+  NU.render();
 }
 
 /* ---------- supplements: describe a dose → nutrients ---------- */
