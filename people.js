@@ -318,7 +318,8 @@ function renderMeds(){
     <div class="card"><div class="card-h"><h2>My medicines</h2><button class="btn primary" id="faAddMed">+ Add medicine</button></div>
       <div>${F.meds.length ? F.meds.slice().sort((a, b) => (b.active !== false) - (a.active !== false) || a.name.localeCompare(b.name)).map(m => {
         const k = stock(m), a30 = adherence(m, 30), dots = Array.from({ length: 7 }, (_, i) => { const d = addD(today, i - 6), ss = slotsOn(m, d).filter(s => !(d === today && hm(s) > nowHM())); if (!ss.length) return `<i class="none" title="${d}"></i>`; const t = ss.filter(s => logFor(m.id, d, s)?.status === "taken").length; return `<i class="${t === ss.length ? "ok" : t ? "part" : d === today ? "" : "miss"}" title="${d}: ${t}/${ss.length}"></i>`; }).join("");
-        return `<div class="fa-med" style="${m.active === false ? "opacity:.55" : ""}"><div class="top"><div><b>${h(m.name)}</b>${m.strength ? ` ${h(m.strength)}` : ""}${m.active === false ? ' <span class="fa-tag">paused</span>' : ""}
+        return `<div class="fa-med" style="${m.active === false ? "opacity:.55" : ""}"><div class="top"><div><b>${h(m.name)}</b>${m.strength ? ` ${h(m.strength)}` : ""}${m.active === false ? ' <span class="fa-tag">paused</span>' : ""}${m.generic && m.generic.toLowerCase() !== m.name.toLowerCase() ? ` <span class="small muted">(${h(m.generic)})</span>` : ""}
+          ${(m.cautions || []).length ? `<div class="small" style="color:var(--warn,#b25000);margin-top:2px">⚠ ${(m.cautions || []).map(h).join(" · ")}</div>` : ""}
           <div class="small muted">${m.freq === "asneeded" ? "As needed" : `${h(unitWord(m, m.qty || 1))} at ${(m.times || []).map(t12).join(", ")}${m.freq === "weekly" ? " on " + (m.dows || []).map(i => DOWS[i]).join(", ") : m.freq === "alternate" ? " every other day" : " daily"}`}${m.food ? " · " + h(FOOD.find(f => f[0] === m.food)?.[1] || "") : ""}${m.condition ? " · for " + h(m.condition) : ""}${m.doctor ? " · Dr " + h(m.doctor) : ""}</div>
           ${k ? `<div class="small" style="margin-top:4px;color:${k.low ? "var(--bad)" : "var(--muted)"}">${k.left <= 0 ? "Pack finished" : `${h(unitWord(m, k.left))} left${k.days != null ? ` · ~${k.days} days` : ""}`}${k.low ? " · restock soon" : ""}</div>` : ""}
           ${m.freq !== "asneeded" ? `<div class="fa-dots" aria-label="Last 7 days">${dots}</div>${a30 ? `<div class="small muted" style="margin-top:4px">${a30.pct}% of doses taken in the last 30 days</div>` : ""}` : ""}</div>
@@ -350,9 +351,95 @@ async function saveMed(m){
   const i = F.meds.findIndex(x => x.id === id); if (i >= 0) F.meds[i] = m; else F.meds.push(m);
   renderMeds(); renderSettingsCards();
 }
-function openMed(m0){
-  const m = m0 || { id: nid("m"), name: "", strength: "", form: "tablet", qty: 1, freq: "daily", times: ["09:00"], food: "", start: ld(), packStart: ld(), refillAt: 7, active: true };
-  const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>${m0 ? "Edit medicine" : "Add medicine"}</h2>${closeBtn}</div>
+const NEW_MED = () => ({ id: nid("m"), name: "", strength: "", form: "tablet", qty: 1, freq: "daily", times: ["09:00"], food: "", start: ld(), packStart: ld(), refillAt: 7, active: true });
+function openMed(m0){ if (m0) return openMedForm(m0); openMedAdd(); }
+
+/* ---- add a medicine: scan the strip/box, scan a prescription, type it, or fill the form ---- */
+const MED_RULES = () => `Reply with ONLY JSON: {"meds":[{"name":"brand or common name as printed","generic":"active ingredient(s) with strengths, e.g. Metformin 500 mg","strength":"e.g. 500 mg","form":"one of: ${FORMS.join(" | ")}","qty":1,"freq":"daily | alternate | weekly | asneeded","times":["HH:MM"],"dows":[],"food":"before | with | after | empty | bed | (empty string)","condition":"what it is usually prescribed for, short","durationDays":null,"packUnits":null,"about":"one plain sentence: what it does","cautions":["short, specific cautions for THIS person (their conditions, other medicines and supplements, labs); empty if none"]}],"unclear":"anything you could not read, else empty"}
+Rules: Indian prescription shorthand: 1-0-1 = morning and night; 1-1-1 or TDS = three times; BD = twice; OD = once; HS = at bedtime; SOS/PRN = as needed (freq "asneeded", times []); AC = before food; PC = after food; "x 5 days" → durationDays 5. Default times: morning 09:00 (empty stomach / before food 08:30), afternoon 14:00, night 21:00, bedtime 22:00; thyroxine-type medicines 06:30 on an empty stomach. packUnits = number of tablets/capsules in the strip or box shown (e.g. "10 tablets" strip), else null. If no dose schedule is visible, use the usual adult schedule for that medicine but say so in "unclear". Never invent a medicine that isn't shown or described.
+Person: ${personLine() || "adult, no details given"}. Other supplements/medicines already in their list: ${activeMeds().map(medLine).join("; ") || "none"}.`;
+function imgB64(file, max = 1600){
+  return new Promise((res, rej) => { const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => { const k = Math.min(1, max / Math.max(im.width, im.height)), c = document.createElement("canvas"); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k); c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c.toDataURL("image/jpeg", .85).split(",")[1]); };
+    im.onerror = () => rej(new Error("Couldn't open that image.")); im.src = url; });
+}
+async function askMeds(kind, file, text){
+  const intro = kind === "rx" ? "This photo is a doctor's prescription (it may be handwritten). List every medicine on it with its dose schedule."
+    : kind === "pack" ? "This photo shows a medicine strip, bottle or box. Read the medicine on it (brand, active ingredient, strength, form, how many units in the pack)."
+    : `The person describes medicine(s) they take: """${text}"""`;
+  const content = [];
+  if (file) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: await imgB64(file) } });
+  content.push({ type: "text", text: intro + "\n" + MED_RULES() });
+  const { text: out } = await claudeCall(content, { maxTokens: 2500 });
+  const j = parseJSONLoose(out); if (!j || !Array.isArray(j.meds)) throw new Error("Couldn't read that. Try a clearer, closer photo, or type it.");
+  return { meds: j.meds.filter(x => x && x.name), unclear: j.unclear || "" };
+}
+function medFromAI(x){
+  const m = NEW_MED(), fm = FORMS.find(f => f.startsWith(String(x.form || "").toLowerCase().split(" ")[0])) || "tablet";
+  const times = (Array.isArray(x.times) ? x.times : []).map(t => String(t).slice(0, 5)).filter(t => /^\d\d:\d\d$/.test(t));
+  const freq = ["daily", "alternate", "weekly", "asneeded"].includes(x.freq) ? x.freq : "daily";
+  return { ...m, name: String(x.name).trim(), strength: String(x.strength || "").trim(), generic: String(x.generic || "").trim(), form: fm, qty: +x.qty > 0 ? +x.qty : 1, freq,
+    times: freq === "asneeded" ? [] : (times.length ? [...new Set(times)].sort() : ["09:00"]), dows: (x.dows || []).map(Number).filter(n => n >= 0 && n <= 6),
+    food: FOOD.some(f => f[0] === x.food) ? x.food : "", condition: String(x.condition || "").trim(), about: String(x.about || "").trim(),
+    cautions: (Array.isArray(x.cautions) ? x.cautions : []).map(String).filter(Boolean).slice(0, 4),
+    end: +x.durationDays > 0 ? addD(ld(), Math.round(+x.durationDays) - 1) : "", packUnits: +x.packUnits > 0 ? +x.packUnits : null };
+}
+function openMedAdd(){
+  const ai = typeof hasAI === "function" ? hasAI() : true;
+  const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>Add medicine</h2>${closeBtn}</div>
+    <div class="fa-row" style="gap:8px;margin:6px 0 12px" role="tablist" id="faMode">
+      <button class="pill-btn" data-mode="pack" aria-pressed="true">Scan strip / box</button><button class="pill-btn" data-mode="rx" aria-pressed="false">Scan prescription</button>
+      <button class="pill-btn" data-mode="text" aria-pressed="false">Type it</button><button class="pill-btn" data-mode="manual" aria-pressed="false">Manual</button></div>
+    <div id="faModeBody"></div><div class="small" id="faAiSt" style="margin-top:10px"></div><div id="faAiOut"></div>`);
+  const body = bg.querySelector("#faModeBody"), st = bg.querySelector("#faAiSt"), outBox = bg.querySelector("#faAiOut");
+  const say = (t, bad) => { st.innerHTML = t; st.style.color = bad ? "var(--bad)" : ""; };
+  const noAI = `<div class="notice">Reading photos needs AI. ${S.settings?.anthropic_key ? "" : "Add your own Claude API key in Settings → Your own Claude key, or "}use <b>Manual</b>.</div>`;
+  const filePick = (id, label, capture) => `<label class="btn ${capture ? "primary" : ""}" style="cursor:pointer">${label}<input type="file" accept="image/*" ${capture ? 'capture="environment"' : ""} id="${id}" hidden></label>`;
+  const run = async (kind, file, text) => {
+    say(kind === "rx" ? "Reading the prescription… (10–20 seconds)" : "Reading… (a few seconds)"); outBox.innerHTML = "";
+    try { const r = await askMeds(kind, file, text); if (!r.meds.length) { say("No medicine found. Try a closer photo with the name visible, or type it.", true); return; } say(""); showFound(r); }
+    catch (e) { say(h(e.message || e) + " You can also use <b>Manual</b>.", true); }
+  };
+  const showFound = ({ meds, unclear }) => {
+    const list = meds.map(medFromAI), dup = m => F.meds.some(x => x.active !== false && x.name.toLowerCase() === m.name.toLowerCase());
+    if (list.length === 1 && !unclear) { bg.close(); openMedForm(list[0], true); return; }
+    outBox.innerHTML = `${unclear ? `<div class="notice" style="margin-bottom:8px">Check: ${h(unclear)}</div>` : ""}
+      <div class="small muted" style="margin-bottom:6px">Found ${list.length} medicine${list.length > 1 ? "s" : ""}. Untick any you don't take, check the times, then add.</div>
+      ${list.map((m, i) => `<div class="fa-med"><div class="top"><label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" data-pick="${i}" ${dup(m) ? "" : "checked"} style="margin-top:4px">
+        <div><b>${h(m.name)}</b> ${h(m.strength)}${dup(m) ? ' <span class="fa-tag">already in your list</span>' : ""}${m.generic && m.generic.toLowerCase() !== m.name.toLowerCase() ? ` <span class="small muted">(${h(m.generic)})</span>` : ""}
+        <div class="small muted">${m.freq === "asneeded" ? "As needed" : `${h(unitWord(m, m.qty))} at ${m.times.map(t12).join(", ")}`}${m.food ? " · " + h(FOOD.find(f => f[0] === m.food)?.[1] || "") : ""}${m.end ? ` · until ${h(m.end)}` : ""}${m.condition ? " · for " + h(m.condition) : ""}</div>
+        ${m.cautions.length ? `<div class="small" style="color:var(--warn,#b25000);margin-top:3px">⚠ ${m.cautions.map(h).join(" · ")}</div>` : ""}</div></label>
+        <button class="btn" data-edit-found="${i}">Edit</button></div></div>`).join("")}
+      <div class="fa-row" style="justify-content:flex-end;margin-top:10px"><button class="btn primary" id="faAddAll">Add selected</button></div>`;
+    outBox.querySelectorAll("[data-edit-found]").forEach(b => b.onclick = () => { bg.close(); openMedForm(list[+b.dataset.editFound], true); });
+    outBox.querySelector("#faAddAll").onclick = async ev => { ev.target.disabled = true;
+      const pick = list.filter((_, i) => outBox.querySelector(`[data-pick="${i}"]`).checked);
+      try { for (const m of pick) await saveMed(m); toast(`Added ${pick.length} medicine${pick.length === 1 ? "" : "s"}`); bg.close(); } catch { ev.target.disabled = false; } };
+  };
+  const show = mode => {
+    bg.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode))); say(""); outBox.innerHTML = "";
+    if (mode === "manual") { bg.close(); openMedForm(NEW_MED(), true); return; }
+    if (!ai) { body.innerHTML = noAI; return; }
+    if (mode === "text") {
+      body.innerHTML = `<div class="fa-form"><label class="full">Describe it<textarea id="faTxt" rows="3" placeholder="e.g. Metformin 500 1-0-1 after food; Telma 40 once in the morning; Dolo 650 SOS"></textarea></label>
+        <div class="full fa-row" style="justify-content:flex-end"><button class="btn primary" id="faTxtGo">Read it</button></div></div>`;
+      body.querySelector("#faTxtGo").onclick = () => { const t = body.querySelector("#faTxt").value.trim(); if (!t) { say("Type the medicine name and how you take it.", true); return; } run("text", null, t); };
+      return;
+    }
+    body.innerHTML = `<p class="small muted" style="margin:0 0 10px">${mode === "rx" ? "Photograph the whole prescription in good light. Handwritten is fine; you'll check everything before it's saved." : "Photograph the side of the strip or box that shows the medicine name and strength (e.g. “Metformin Hydrochloride Tablets IP 500 mg”)."}</p>
+      <div class="fa-row">${filePick("faCam", "📷 Take photo", true)}${filePick("faUp", "Upload photo", false)}</div>`;
+    body.querySelectorAll("input[type=file]").forEach(inp => inp.onchange = () => { const f = inp.files?.[0]; if (f) run(mode, f); inp.value = ""; });
+  };
+  bg.querySelector("#faMode").onclick = e => { const b = e.target.closest("[data-mode]"); if (b) show(b.dataset.mode); };
+  show("pack");
+}
+
+function openMedForm(m0, fresh){
+  const m = m0 || NEW_MED(); const isNew = fresh || !m0;
+  const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>${isNew ? "Add medicine" : "Edit medicine"}</h2>${closeBtn}</div>
+    ${m.generic || m.about ? `<p class="small" style="margin:0 0 6px">${m.generic ? `<b>${h(m.generic)}</b>. ` : ""}${h(m.about || "")}</p>` : ""}
+    ${(m.cautions || []).length ? `<div class="notice" style="margin-bottom:10px">⚠ ${(m.cautions || []).map(h).join("<br>⚠ ")}</div>` : ""}
+    ${isNew && m.name ? `<p class="small muted" style="margin:0 0 8px">Read by AI: check the strength, times and pack size against your prescription before saving.</p>` : ""}
     <form class="fa-form" id="faM">
       <label class="full">Medicine name<input name="name" required value="${h(m.name)}" placeholder="e.g. Metformin, Telmisartan, Thyronorm"></label>
       <label>Strength<input name="strength" value="${h(m.strength || "")}" placeholder="e.g. 500 mg"></label>
@@ -371,7 +458,7 @@ function openMed(m0){
       <label>Remind me to restock when<select name="refillAt">${[3, 5, 7, 10, 14].map(n => `<option value="${n}" ${+m.refillAt === n ? "selected" : ""}>${n} days left</option>`).join("")}</select></label>
       <label class="full">Notes<input name="notes" value="${h(m.notes || "")}" placeholder="e.g. check sugar before taking"></label>
       <label class="full" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="active" ${m.active !== false ? "checked" : ""} style="width:auto"> Currently taking</label>
-      <div class="full fa-row" style="justify-content:space-between">${m0 ? `<button type="button" class="btn" id="faDelM" style="color:var(--bad)">Delete</button>` : "<span></span>"}<button class="btn primary" type="submit">Save</button></div>
+      <div class="full fa-row" style="justify-content:space-between">${!isNew ? `<button type="button" class="btn" id="faDelM" style="color:var(--bad)">Delete</button>` : "<span></span>"}<button class="btn primary" type="submit">Save</button></div>
     </form>`);
   const fm = bg.querySelector("#faM"), tw = bg.querySelector("#faTimes");
   const sync = () => { const fq = fm.elements.freq.value; bg.querySelector("#faTimesW").hidden = fq === "asneeded"; bg.querySelector("#faDowsW").hidden = fq !== "weekly"; fm.querySelectorAll("input[name=time]").forEach(i => i.required = fq !== "asneeded"); };
