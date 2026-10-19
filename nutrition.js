@@ -1211,6 +1211,8 @@ function labNote(m){
 }
 
 N.miView = N.miView || "day";
+// shown to everyone by default; others appear when a supplement contains them, a condition makes them relevant, or "Show all" is on
+const CORE_MI = ["vitA", "vitD", "vitE", "vitC", "b6", "b9", "b12", "ca", "fe", "mg", "zn", "k", "i", "fibre", "omega3", "satfat", "sugar", "chol", "caffeine"];
 function renderMicros(){
   const box = q("#nuMicro"); if (!box) return;
   syncExtras(); classifyNew();
@@ -1219,7 +1221,17 @@ function renderMicros(){
   qa("[data-miv]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.miv === N.miView)));
   const missing = dayItems(N.day).filter(e => e.meal !== "supplements" && !(e.micros || []).length);
   q("#nuMiHint").innerHTML = N.miView === "week" ? `Average of ${days.length} logged day${days.length === 1 ? "" : "s"}` : r.items ? `${r.est} of ${r.items} food items estimated · supplements from labels` : "";
-  const groups = ["Vitamins", "Minerals", "Other", "From supplements", "Limits"].filter(g => MI.some(m => m.g === g));
+  // standard view: the key nutrients everyone should watch, plus anything your conditions make relevant or your supplements contain
+  let showAll = false; try { showAll = localStorage.getItem("nu-mi-all") === "1"; } catch {}
+  const fl = window.HLP?.flags?.() || new Set(), rel = new Set(CORE_MI);
+  if (fl.has("single_kidney") || fl.has("ckd") || fl.has("stones")) ["p", "k"].forEach(k => rel.add(k));
+  if (fl.has("t2d") || fl.has("t1d") || fl.has("prediabetes")) rel.add("cr");
+  if (fl.has("hypo") || fl.has("hyper")) rel.add("se");
+  if (fl.has("pregnant") || fl.has("breastfeeding")) rel.add("choline");
+  const inSupps = new Set(); for (const sp of Object.values(N.supps)) if (sp.active !== false) for (const x of suppNorm(sp).doseMicros || []) { const mk = MIK[x.n] || microKey(x.n); if (mk) inSupps.add(mk.k); }
+  const visible = m => showAll || rel.has(m.k) || (r.supp[m.k] || 0) > 0 || inSupps.has(m.k) || (m.extra && (r.tot[m.k] || 0) > 0);
+  const hidden = MI.filter(m => !visible(m)).length;
+  const groups = ["Vitamins", "Minerals", "Other", "From supplements", "Limits"].filter(g => MI.some(m => m.g === g && visible(m)));
   const row = m => { const [st, lbl, f] = microStatus(m, r), v = r.tot[m.k] || 0, goal = m.lim ?? m.t;
     const col = st === "out" ? "var(--bad)" : st === "border" ? "var(--warn)" : st === "low" ? "var(--warn)" : "var(--ok)";
     const sp = r.supp[m.k] && !m.extra ? ` · ${fmtMi(r.supp[m.k])} from supplements` : "";
@@ -1228,9 +1240,11 @@ function renderMicros(){
       <span class="bar"><i style="width:${Math.min(100, f * 100)}%;background:${col}"></i></span>
       <span class="s">${st === "low" ? `<span style="color:var(--warn)">${lbl}</span>` : st === "ok" ? `<span style="color:var(--ok)">${lbl}</span>` : chipH(st, lbl)}${sp}</span></button>`; };
   box.innerHTML = (missing.length && N.miView === "day" ? `<div class="notice" style="margin-bottom:10px" id="nuMiMiss">${micState.busy ? "Estimating micronutrients for your food…" : `${missing.length} food item${missing.length > 1 ? "s" : ""} not estimated yet. <button class="btn" id="nuMiEst" style="margin-left:6px">Estimate now</button>`}${micState.err ? `<div class="small" style="color:var(--bad);margin-top:4px">${micState.err}</div>` : ""}</div>` : "")
-    + groups.map(g => `<div class="nu-sec">${g === "Limits" ? "Keep under" : g}</div><div class="nu-mis">${MI.filter(m => m.g === g).map(row).join("")}</div>`).join("")
+    + groups.map(g => `<div class="nu-sec">${g === "Limits" ? "Keep under" : g}</div><div class="nu-mis">${MI.filter(m => m.g === g && visible(m)).map(row).join("")}</div>`).join("")
+    + (hidden || showAll ? `<div class="row" style="margin-top:8px"><button class="btn" id="nuMiAll">${showAll ? "Show key nutrients only" : `Show all nutrients (${hidden} more)`}</button></div>` : "")
     + `<div class="row" style="justify-content:space-between;margin-top:10px"><span class="small muted">Food values are estimates from Indian (IFCT) and USDA food tables. K = kidney note. Tap a nutrient for details.</span><button class="btn" id="nuMiBack">Estimate past days</button></div>`;
   const b = q("#nuMiEst"); if (b) b.onclick = () => estimateMicros(missing, true);
+  const ab = q("#nuMiAll"); if (ab) ab.onclick = () => { try { localStorage.setItem("nu-mi-all", showAll ? "0" : "1"); } catch {} renderMicros(); };
   q("#nuMiBack").onclick = () => { const all = N.entries.filter(e => e.meal !== "supplements" && !(e.micros || []).length); if (!all.length) { toast("Every logged food already has micronutrients."); return; } estimateMicros(all, true); };
   // estimate today's items automatically once per day view
   if (missing.length && N.miView === "day" && !micState.busy && !micState.tried.has(N.day) && N.loaded && typeof S !== "undefined" && window.hasAI?.()) { micState.tried.add(N.day); estimateMicros(missing, false); }
