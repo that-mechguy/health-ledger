@@ -8,10 +8,10 @@ const root = document.getElementById("v-nutrition");
 if (!root) return;
 
 /* ---------- constants ---------- */
-const DEFAULT_PLAN = { name: "", calculated: "2026-10-05", goal: "Lose fat, build muscle", startKg: 92.2, goalKg: 70.8, heightCm: 176, age: 29, sex: "male",
-  activity: 1.55, activityLabel: "Moderately active (×1.55)", pace: "Steady",
-  kcal: 2400, protein: 110, proteinCapG: 120, carbs: 310, fat: 80, waterL: 3.0, sodiumMg: 2000,
-  bmr: 1881, tdee: 2916, deficit: 516, kgPerWeek: 0.47, weeks: 46, kidney: true };
+const DEFAULT_PLAN = { name: "", calculated: "", goal: "Set up your profile (Settings → Profile & health)", startKg: null, goalKg: null, heightCm: null, age: null, sex: "",
+  activity: 1.375, activityLabel: "", pace: "",
+  kcal: 2000, protein: 60, proteinCapG: 100, carbs: 260, fat: 65, waterL: 2.5, sodiumMg: 2000,
+  bmr: null, tdee: null, deficit: 0, kgPerWeek: 0, weeks: null, kidney: false };
 const MEALS = [
   { id: "breakfast", name: "Breakfast" }, { id: "lunch", name: "Lunch" }, { id: "dinner", name: "Dinner" },
   { id: "snacks", name: "Snacks" }, { id: "supplements", name: "Supplements", hidden: true }];
@@ -302,7 +302,7 @@ NU.load = async function(){
     N.entries = older.concat(rng.entries); N.water = olderW.concat(rng.water); N.loadedFrom = N.loadedFrom && N.loadedFrom < from ? N.loadedFrom : from;
     N.products = {}; for (const x of pr.data) N.products[x.code] = { ...x.doc, code: x.code, usedAt: x.used_at };
     N.supps = {}; for (const x of sp.data) N.supps[x.id] = { ...x.doc, id: x.id, active: x.active };
-    N.plan = { ...DEFAULT_PLAN, ...(pl.data?.plan || {}) }; N.planSaved = !!pl.data;
+    N.plan = { ...DEFAULT_PLAN, ...(pl.data?.plan || (planFromProfile() || {})) }; N.planSaved = !!pl.data;
     N.loaded = true; showNotice("");
   } catch (err) {
     const m = String(err?.message || err?.code || err);
@@ -332,7 +332,7 @@ async function addEntries(list){
   if (error) { toast("Couldn't save: " + error.message); throw error; }
   N.entries.push(...rows.map(rowToEntry)); NU.render();
   const fresh = N.entries.filter(e => rows.some(r => r.id === e.id) && e.meal !== "supplements" && !(e.micros || []).length);
-  if (fresh.length && S.settings?.anthropic_key) setTimeout(() => estimateMicros(fresh, false), 50);
+  if (fresh.length && window.hasAI?.()) setTimeout(() => estimateMicros(fresh, false), 50);
   return rows.map(rowToEntry);
 }
 async function updateEntry(id, patch){
@@ -432,8 +432,14 @@ function healthContext(){
     if (hi("tg")) flags.push(`triglycerides high (${hi("tg")}): flag sugar, sweets, refined carbs and alcohol`);
     if (hi("alt") || hi("ggt")) flags.push("liver enzymes raised: flag alcohol and fried or very sugary foods");
     const a1 = latest.hba1c && parseFloat(latest.hba1c.value); if (a1 >= 5.7) flags.push(`HbA1c ${a1}: flag high-sugar items`);
-    if (N.plan.kidney) flags.push(`one underdeveloped kidney: keep sodium under ${N.plan.sodiumMg || 2000} mg/day and protein moderate`);
-    return flags.length ? "Health notes for this person: " + flags.join("; ") + ". If an item is relevant, mention it briefly in \"note\"." : "";
+    if (N.plan.kidney) flags.push(`kidney: keep sodium under ${N.plan.sodiumMg || 2000} mg/day and protein moderate`);
+    const fl = window.HLP?.flags?.() || new Set();
+    if (fl.has("t2d") || fl.has("t1d") || fl.has("prediabetes")) flags.push("diabetes/prediabetes: flag sugary and refined-carb items and suggest pairing carbs with protein/fibre");
+    if (fl.has("htn") || fl.has("heart")) flags.push(`blood pressure/heart: flag salty items (sodium limit ${N.plan.sodiumMg || 1500} mg/day)`);
+    if (fl.has("chol")) flags.push("high cholesterol: flag saturated fat (ghee, butter, cream, fried food)");
+    if (fl.has("pregnant")) flags.push("pregnant: flag unsafe foods (raw/undercooked eggs or meat, unpasteurised dairy, high-mercury fish, alcohol)");
+    const who = window.HLP?.personLine?.() || "";
+    return (who ? who + " " : "") + (flags.length ? "Health notes for this person: " + flags.join("; ") + ". If an item is relevant, mention it briefly in \"note\"." : "");
   } catch { return ""; }
 }
 
@@ -445,7 +451,7 @@ const waterOn = d => Math.max(0, N.water.reduce((a, x) => a + (x.date === d ? x.
 /* ---------- render ---------- */
 NU.render = function(){
   if (root.hidden && N.rendered) return; N.rendered = true;
-  N.today = today();
+  N.today = today(); personaliseMI();
   const P = N.plan, d = N.day, t = totals(d), isT = d === N.today;
   const diff = Math.round((parseD(d) - parseD(N.today)) / 864e5);
   q("#nuTitle").textContent = isT ? "Today" : diff === -1 ? "Yesterday" : DOWL[parseD(d).getDay()];
@@ -903,7 +909,7 @@ q("#nuDoses").onclick = async ev => {
 q("#nuLib").onclick = ev => { const ab = ev.target.closest("[data-about]"); if (ab) { aboutSupp(ab.dataset.about); return; } const b = ev.target.closest("[data-edit]"); if (b) openSupp("manual", N.supps[b.dataset.edit]); };
 q("#nuSFind").onclick = () => openSupp("search"); q("#nuSScan").onclick = () => openSupp("scan"); q("#nuSMan").onclick = () => openSupp("manual");
 const SUPP_JSON = `{"name":"","brand":"","unit":"capsule","servingQty":2,"packUnits":60,"perServing":{"kcal":0,"p":0,"c":0,"f":0,"na":0},"micros":[{"n":"Vitamin D3","amt":1000,"unit":"IU"}],"kidneyNote":"","note":"","found":true}`;
-const SUPP_RULES = `Rules: unit = one countable piece (${UNITS.join(", ")}); powders by scoop → "scoop". servingQty = units in ONE label serving. packUnits = units in the whole pack (or servings per container × servingQty; net weight ÷ scoop grams), 0 if unknown. perServing = per ONE label serving: kcal, p, c, f in g, na in mg. micros = every vitamin/mineral/active per serving with amount and unit (IU, mg, µg, g), incl. creatine, caffeine, EPA/DHA; not macros. kidneyNote: the person has ONE underdeveloped kidney (normal eGFR, protein cap ~120 g/day): for creatine, protein powders, vitamin D > 2,000 IU/serving, vitamin C ≥ 500 mg, potassium/magnesium/phosphorus, herbal blends or NSAIDs give ONE short neutral line like "Creatine: check with your nephrologist", else "".`;
+const SUPP_RULES_F = () => `Rules: unit = one countable piece (${UNITS.join(", ")}); powders by scoop → "scoop". servingQty = units in ONE label serving. packUnits = units in the whole pack (or servings per container × servingQty; net weight ÷ scoop grams), 0 if unknown. perServing = per ONE label serving: kcal, p, c, f in g, na in mg. micros = every vitamin/mineral/active per serving with amount and unit (IU, mg, µg, g), incl. creatine, caffeine, EPA/DHA; not macros. kidneyNote: ${window.HLP?.personLine?.() || ""} If this product matters for this person's conditions or medicines (e.g. kidney: creatine, protein powders, vitamin D > 2,000 IU, vitamin C ≥ 500 mg, potassium/magnesium/phosphorus, herbal blends; diabetes/BP/thyroid/blood-thinner interactions), give ONE short neutral line like "Creatine: check with your nephrologist", else "".`;
 function openSupp(mode, ex0){
   const ex = ex0 ? suppNorm(ex0) : null;
   const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>${ex ? "Edit supplement" : "Add supplement"}</h2>${closeBtn}</div>
@@ -948,11 +954,11 @@ function openSupp(mode, ex0){
   bg.querySelector("#spModes")?.addEventListener("click", ev => { const b = ev.target.closest("[data-m]"); if (b) setMode(b.dataset.m); });
   const fromAI = (out, extra) => fill({ ...out, perServing: out.perServing || {}, microsServing: out.micros || [], takeQty: out.servingQty || 1, active: true, ...extra });
   bg.querySelector("#spFind").onclick = async () => { const v = bg.querySelector("#spQ").value.trim(); if (!v) return; st("Looking it up… (a few seconds)");
-    try { const out = await askJSON(`Give the label for this dietary supplement sold in India: """${v}""". Use the brand's published Supplement Facts as you know them; pick the most common variant and pack and name it. If you don't recognise it, "found":false with a reason in "note"; otherwise say in "note" which variant you used.\n${SUPP_RULES}\nReply with ONLY JSON: ${SUPP_JSON}`);
+    try { const out = await askJSON(`Give the label for this dietary supplement sold in India: """${v}""". Use the brand's published Supplement Facts as you know them; pick the most common variant and pack and name it. If you don't recognise it, "found":false with a reason in "note"; otherwise say in "note" which variant you used.\n${SUPP_RULES_F()}\nReply with ONLY JSON: ${SUPP_JSON}`);
       if (!out || out.found === false) { st(e2(out?.note || "Not found. Try the full brand and product name, or scan the label."), true); return; }
       fromAI(out, { src: "search" }); st(e2((out.note ? out.note + " " : "") + "Check against your box, set how much you take, then save.")); } catch (err) { st(errMsg(err, "Lookup failed."), true); } };
   const readL = async (file, code) => { st("Reading the label… (a few seconds)");
-    try { const out = await askJSON(`This photo shows a dietary supplement's packaging${code ? ` (barcode ${code})` : ""}, ideally its Supplement Facts panel and pack size. Read it exactly. If unreadable, "found":false with why in "note".\n${SUPP_RULES}\nReply with ONLY JSON: ${SUPP_JSON}`, file);
+    try { const out = await askJSON(`This photo shows a dietary supplement's packaging${code ? ` (barcode ${code})` : ""}, ideally its Supplement Facts panel and pack size. Read it exactly. If unreadable, "found":false with why in "note".\n${SUPP_RULES_F()}\nReply with ONLY JSON: ${SUPP_JSON}`, file);
       if (!out || out.found === false) { st(e2(out?.note || "Couldn't read that label. Try a closer, sharper photo."), true); return; }
       fromAI(out, { barcode: code || F.barcode.value, src: "label-photo" }); st(e2((out.note ? out.note + " " : "") + "Check the values, set how much you take, then save.")); } catch (err) { st(errMsg(err, "Couldn't read the label."), true); } };
   fileHandlers.spl = f => readL(f, F.barcode.value);
@@ -974,6 +980,32 @@ function planFrom(kg, base){
   const kgWk = deficit * 7 / 7700, weeks = p.goalKg && kg > p.goalKg ? Math.round((kg - p.goalKg) / kgWk) : null;
   return { startKg: r1(kg), bmr: Math.round(bmr), tdee: Math.round(tdee), kcal, deficit: Math.round(deficit), protein, proteinCapG: cap, fat, carbs, kgPerWeek: r1(kgWk * 100) / 100, weeks, calculated: N.today };
 }
+// Targets from the profile (Settings → Profile & health): Mifflin-St Jeor × activity, goal, and condition-aware protein / sodium / carbs
+function planFromProfile(){
+  const H = window.HLP, pr = H?.profile?.(); if (!pr || !pr.heightCm || !(pr.weightKg || latestWeight()?.kg)) return null;
+  const fl = H.flags(), fem = pr.sex === "female", age = H.age() || 30, cm = +pr.heightCm;
+  const lw = latestWeight(), kg = +(pr.weightKg || lw.kg);
+  const act = +pr.activity || 1.375, bmr = 10 * kg + 6.25 * cm - 5 * age + (fem ? -161 : 5), tdee = bmr * act;
+  const preg = fl.has("pregnant"), bf = fl.has("breastfeeding"), goal = preg || bf ? "maintain" : pr.goal || "maintain";
+  let kcal = goal === "lose" ? Math.max(tdee - 500, fem ? 1200 : 1500, bmr) : goal === "gain" ? tdee + 300 : tdee;
+  if (preg) kcal += 350; if (bf) kcal += 450;
+  kcal = Math.round(kcal / 50) * 50;
+  const m = cm / 100, bmi = kg / (m * m), refKg = bmi > 30 ? 25 * m * m + .25 * (kg - 25 * m * m) : kg;   // adjusted weight for protein when BMI > 30
+  const ckd = fl.has("ckd"), single = fl.has("single_kidney"), kidney = ckd || single;
+  let gkg = goal === "gain" ? 1.6 : goal === "lose" ? 1.4 : 1.0, cap = 2.0;
+  if (single) { gkg = 1.2; cap = 1.3; } if (ckd) { gkg = .8; cap = .8; } if (preg || bf) gkg = Math.max(gkg, 1.1);
+  const protein = Math.round(refKg * gkg), proteinCapG = Math.round(refKg * cap);
+  const pc = new Set(pr.conditions || []), diab = pc.has("t2d") || pc.has("t1d") || pc.has("prediabetes") || pc.has("pcos");   // macro split only from conditions the person ticked
+  const fat = Math.round(kcal * (diab ? .35 : .3) / 9), carbs = Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4));
+  const sodiumMg = fl.has("htn") || fl.has("heart") || ckd ? 1500 : 2000;
+  const waterL = ckd ? 2 : Math.min(3.5, Math.max(2, Math.round(kg * .033 * 2) / 2 + (preg ? .3 : 0) + (bf ? .7 : 0)));
+  const deficit = Math.round(tdee - kcal), kgWk = deficit > 0 ? deficit * 7 / 7700 : 0, goalKg = +pr.goalKg || null;
+  const actL = (H.ACTIVITY || []).find(a => a[0] === act)?.[1] || "";
+  return { name: pr.name || "", calculated: N.today, goal: { lose: "Lose fat", gain: "Gain muscle / weight", maintain: "Maintain weight" }[goal], startKg: r1(kg), goalKg, heightCm: cm, age, sex: pr.sex,
+    activity: act, activityLabel: actL ? `${actL.split(" (")[0]} (×${act})` : `×${act}`, bmr: Math.round(bmr), tdee: Math.round(tdee), kcal, deficit, protein, proteinCapG, fat, carbs, sodiumMg, waterL,
+    kgPerWeek: r1(kgWk * 100) / 100, weeks: goalKg && kg > goalKg && kgWk ? Math.round((kg - goalKg) / kgWk) : null, kidney, ckd };
+}
+NU.plan = () => N.plan; NU.planSaved = () => N.planSaved; NU.isLoaded = () => !!N.loaded; NU.planFromProfile = planFromProfile; NU.savePlan = p => savePlan(p);
 function openPlan(){
   const P = N.plan, lw = latestWeight(), next = lw && Math.abs(lw.kg - P.startKg) >= 1 ? planFrom(lw.kg, P) : null;
   const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>My plan</h2>${closeBtn}</div>
@@ -985,7 +1017,8 @@ function openPlan(){
       <div>Weight</div><div>${P.startKg} → ${P.goalKg} kg</div><div>Pace</div><div>~${P.kgPerWeek} kg/week${P.weeks ? ` · ~${P.weeks} weeks` : ""}</div></div>
     ${next ? `<div class="notice">Your latest weight is <b>${r1(lw.kg)} kg</b> (${e2(lw.src)}, ${e2(lw.date)}). Recalculated plan: <b>${nf(next.kcal)} kcal</b> · protein ${next.protein} g (cap ${next.proteinCapG}) · carbs ${next.carbs} g · fat ${next.fat} g.
       <div class="row" style="margin-top:8px"><button class="btn primary" id="plUse">Use the new plan</button></div></div>` : ""}
-    ${P.kidney ? `<p class="small">Kidney-aware: protein is set at about 1.2 g/kg, under the 1.3 g/kg level KDIGO advises people at risk of kidney disease not to exceed, and sodium is capped at ${nf(P.sodiumMg)} mg. Confirm targets with your nephrologist.</p>` : ""}
+    ${P.ckd ? `<p class="small">Kidney-aware: protein is set at 0.8 g/kg (KDIGO guidance for chronic kidney disease) and sodium is capped at ${nf(P.sodiumMg)} mg. Your nephrologist may set different limits for potassium, phosphorus and fluids; follow theirs.</p>` : P.kidney ? `<p class="small">Kidney-aware: protein is set at about 1.2 g/kg, under the 1.3 g/kg level KDIGO advises people at risk of kidney disease not to exceed, and sodium is capped at ${nf(P.sodiumMg)} mg. Confirm targets with your nephrologist.</p>` : ""}
+    ${window.HLP?.profile?.() ? `<button class="btn" id="plProf">Recalculate from my profile</button> ` : `<div class="notice">Set up your profile in Settings → Profile &amp; health to get targets worked out for your body and conditions.</div>`}
     <p class="small muted">Method: Mifflin-St Jeor BMR × activity multiplier; ~500 kcal daily deficit; ~7,700 kcal per kg; fat ~30% of calories; carbs fill the rest. General guidance, not medical advice.</p>
     <button class="btn" id="plEditT">Adjust targets</button>
     <form class="nu-form" id="plForm" hidden>
@@ -999,23 +1032,24 @@ function openPlan(){
   bg.querySelector("#plEditT").onclick = () => { fm.hidden = !fm.hidden; chk(); }; fm.oninput = chk;
   fm.onsubmit = async ev => { ev.preventDefault(); const f = new FormData(fm), o = {}; for (const k of ["kcal", "waterL", "protein", "proteinCapG", "carbs", "fat", "sodiumMg", "goalKg"]) o[k] = +f.get(k);
     try { await savePlan(o); toast("Targets saved"); bg.close(); } catch {} };
+  bg.querySelector("#plProf")?.addEventListener("click", () => { bg.close(); window.HLP.openProfile(false); });
   bg.querySelector("#plUse")?.addEventListener("click", async () => { try { await savePlan(next); toast("Plan updated from your latest weight"); bg.close(); } catch {} });
 }
 
 /* ---------- micronutrients: targets, totals (food estimates + supplement labels), card + details ---------- */
 // Targets: ICMR-NIN 2020 RDAs (adult man, moderate activity) where published; otherwise NIH / National Academies DRIs (men 19–30).
-// "ul" = tolerable upper intake (National Academies); "ulSupp" = that limit applies to supplements/fortified only; "cap" = a softer personal limit for one underdeveloped kidney.
+// "ul" = tolerable upper intake (National Academies); "ulSupp" = that limit applies to supplements/fortified only; "cap" = a softer personal limit set by personaliseMI() from the profile's conditions.
 const MI = [
   // vitamins
   { k: "vitA", n: "Vitamin A", u: "µg", t: 1000, ul: 3000, g: "Vitamins", re: /vitamin a\b|retinol|beta.?carotene/, iu: .3,
     why: "Vision, skin, immunity.", src: "Carrots, sweet potato, spinach, pumpkin, mango, milk, curd.", note: "The upper limit is for preformed vitamin A (supplements, liver); carotenes from vegetables are safe." },
   { k: "vitD", n: "Vitamin D", u: "µg", t: 15, ul: 100, g: "Vitamins", re: /vitamin d|cholecalciferol|ergocalciferol|\bd3\b/, iu: 1 / 40,
     why: "Calcium absorption, bones, muscles, immunity, testosterone.", src: "Sunlight (15–20 min midday), fortified milk, mushrooms in sun, egg yolk; usually needs a supplement.",
-    note: "Target 15 µg = 600 IU (ICMR). With your low levels a doctor-guided supplement is normal; doses above 2,000 IU a day should be agreed with your nephrologist because of the single kidney." },
+    note: "Target 15 µg = 600 IU (ICMR). Most people in India test low; if yours is low, a doctor-guided supplement is normal." },
   { k: "vitE", n: "Vitamin E", u: "mg", t: 15, ul: 1000, ulSupp: 1, g: "Vitamins", re: /vitamin e\b|tocopherol/, iu: .67, why: "Antioxidant; protects cells.", src: "Almonds, sunflower seeds, peanuts, vegetable oils, spinach." },
   { k: "vitK", n: "Vitamin K", u: "µg", t: 120, g: "Vitamins", re: /vitamin k|phylloquinone|menaquinone|mk-?7/, why: "Blood clotting, bone health.", src: "Spinach, methi, broccoli, cabbage, soybeans." },
-  { k: "vitC", n: "Vitamin C", u: "mg", t: 80, ul: 2000, cap: 1000, g: "Vitamins", re: /vitamin c|ascorbic/, why: "Immunity, collagen; improves iron absorption from plant foods.", src: "Amla, guava, citrus, capsicum, tomato, sprouts.",
-    note: "Kidney: keep supplements under 500 mg a day; high doses raise oxalate and kidney-stone risk." },
+  { k: "vitC", n: "Vitamin C", u: "mg", t: 80, ul: 2000, g: "Vitamins", re: /vitamin c|ascorbic/, why: "Immunity, collagen; improves iron absorption from plant foods.", src: "Amla, guava, citrus, capsicum, tomato, sprouts.",
+},
   { k: "b1", n: "Thiamine (B1)", u: "mg", t: 1.8, g: "Vitamins", re: /thiamin|vitamin b1\b|\bb1\b/, why: "Turns carbs into energy; nerves.", src: "Whole grains, dal, peanuts, sunflower seeds." },
   { k: "b2", n: "Riboflavin (B2)", u: "mg", t: 2.5, g: "Vitamins", re: /riboflavin|vitamin b2\b|\bb2\b/, why: "Energy metabolism; eyes and skin.", src: "Milk, curd, paneer, eggs, almonds, mushrooms." },
   { k: "b3", n: "Niacin (B3)", u: "mg", t: 18, ul: 35, ulSupp: 1, g: "Vitamins", re: /niacin|nicotin|vitamin b3\b|\bb3\b/, why: "Energy metabolism; skin and nerves.", src: "Peanuts, whole grains, mushrooms, green peas.", note: "The limit is for supplements; food niacin is safe." },
@@ -1024,19 +1058,18 @@ const MI = [
   { k: "b7", n: "Biotin (B7)", u: "µg", t: 30, g: "Vitamins", re: /biotin|vitamin b7|vitamin h\b/, why: "Fat and carb metabolism; hair and nails.", src: "Eggs, peanuts, almonds, sweet potato." },
   { k: "b9", n: "Folate (B9)", u: "µg", t: 400, ul: 1000, ulSupp: 1, g: "Vitamins", re: /folate|folic|vitamin b9|methylfolate/, folic: 1.7,
     why: "DNA and red blood cells; with B12 it clears homocysteine.", src: "Dal, rajma, chana, spinach, methi, broccoli, oranges.",
-    note: "ICMR sets 300 µg; 400 µg is used here because your homocysteine was high. The limit applies to folic acid from supplements." },
+    note: "The limit applies to folic acid from supplements and fortified foods." },
   { k: "b12", n: "Vitamin B12", u: "µg", t: 2.4, g: "Vitamins", re: /b12|cobalamin/, why: "Nerves, red blood cells, energy; with folate it clears homocysteine.", src: "Milk, curd, paneer, eggs, fortified foods. Plant foods have almost none, so vegetarians often need a supplement.",
-    note: "Daily need is small, but with low blood B12 your doctor may prescribe much more for a while. Very high doses are considered safe." },
+    note: "Daily need is small; if your blood B12 is low your doctor may prescribe much more for a while. Very high doses are considered safe." },
   { k: "choline", n: "Choline", u: "mg", t: 550, ul: 3500, g: "Vitamins", re: /choline/, why: "Liver fat processing, brain and muscle.", src: "Eggs, soybeans, paneer, peanuts, broccoli." },
   // minerals
-  { k: "ca", n: "Calcium", u: "mg", t: 1000, ul: 2500, cap: 2000, g: "Minerals", re: /calcium/, why: "Bones, muscles, nerves.", src: "Milk, curd, paneer, ragi, sesame, tofu, green leafy vegetables.",
-    note: "Kidney: get most of it from food; high-dose calcium supplements can raise kidney-stone risk." },
-  { k: "p", n: "Phosphorus", u: "mg", t: 1000, ul: 4000, cap: 1400, g: "Minerals", re: /phosph/, why: "Bones, energy (ATP).", src: "Dal, dairy, nuts, whole grains.",
-    note: "Kidney: no need to restrict with normal kidney function, but avoid phosphate additives (colas, processed cheese, packaged meats) and phosphorus supplements." },
+  { k: "ca", n: "Calcium", u: "mg", t: 1000, ul: 2500, g: "Minerals", re: /calcium/, why: "Bones, muscles, nerves.", src: "Milk, curd, paneer, ragi, sesame, tofu, green leafy vegetables.",
+},
+  { k: "p", n: "Phosphorus", u: "mg", t: 1000, ul: 4000, g: "Minerals", re: /phosph/, why: "Bones, energy (ATP).", src: "Dal, dairy, nuts, whole grains.",
+},
   { k: "mg", n: "Magnesium", u: "mg", t: 440, ul: 350, ulSupp: 1, g: "Minerals", re: /magnes/, why: "Muscle and nerve function, sleep, blood sugar.", src: "Pumpkin seeds, almonds, cashews, dark leafy greens, whole grains, dal.",
-    note: "The 350 mg limit is for supplements only. Kidney: check magnesium supplements with your doctor (the kidneys clear excess magnesium)." },
-  { k: "k", n: "Potassium", u: "mg", t: 3400, g: "Minerals", re: /potassium/, why: "Blood pressure, heart rhythm, muscles.", src: "Banana, coconut water, potatoes, dal, curd, tomatoes, spinach.",
-    note: "Kidney: food potassium is helpful while kidney function is normal. Avoid potassium supplements and salt substitutes (KCl) unless your doctor agrees." },
+    note: "The 350 mg limit is for supplements only." },
+  { k: "k", n: "Potassium", u: "mg", t: 3400, g: "Minerals", re: /potassium/, why: "Blood pressure, heart rhythm, muscles.", src: "Banana, coconut water, potatoes, dal, curd, tomatoes, spinach." },
   { k: "fe", n: "Iron", u: "mg", t: 19, ul: 45, g: "Minerals", re: /\biron\b|ferrous|ferric/, why: "Carries oxygen in blood; energy.", src: "Dal, rajma, chana, spinach, jaggery, dates, fortified cereals. Pair with vitamin C; avoid tea with meals." },
   { k: "zn", n: "Zinc", u: "mg", t: 17, ul: 40, g: "Minerals", re: /zinc/, why: "Immunity, wound healing, testosterone.", src: "Pumpkin seeds, chickpeas, cashews, paneer, whole grains." },
   { k: "cu", n: "Copper", u: "mg", t: .9, ul: 10, g: "Minerals", re: /copper/, why: "Iron use, nerves, connective tissue.", src: "Cashews, sesame, chickpeas, whole grains." },
@@ -1049,12 +1082,59 @@ const MI = [
   // other
   { k: "fibre", n: "Fibre", u: "g", t: 30, g: "Other", re: /fib(re|er)/, why: "Gut health, cholesterol, blood sugar, fullness.", src: "Dal, rajma, chana, whole grains, oats, fruit, vegetables, seeds." },
   { k: "omega3", n: "Omega-3 (ALA/EPA/DHA)", u: "mg", t: 1600, g: "Other", re: /omega.?3|\bepa\b|\bdha\b|fish oil|\bala\b|linolenic/, why: "Heart, triglycerides, brain.", src: "Flaxseed, chia, walnuts, mustard/soybean oil; algae oil for EPA/DHA.", note: "Target 1.6 g ALA (plant omega-3) for men; EPA/DHA from supplements counts too." },
-  { k: "satfat", n: "Saturated fat", u: "g", lim: 18, g: "Limits", re: /saturated/, why: "Raises LDL cholesterol.", src: "Ghee, butter, cream, cheese, coconut oil, fried and bakery foods.", note: "Kept under ~7% of calories because of your LDL." },
+  { k: "satfat", n: "Saturated fat", u: "g", lim: 18, g: "Limits", re: /saturated/, why: "Raises LDL cholesterol.", src: "Ghee, butter, cream, cheese, coconut oil, fried and bakery foods.", note: "" },
   { k: "sugar", n: "Added sugar", u: "g", lim: 25, g: "Limits", re: /added sugar|^sugars?$/, why: "Raises triglycerides, liver fat and uric acid.", src: "Sweets, sugar in tea/coffee, juices, soft drinks, biscuits.", note: "Fructose (sugary drinks, juice) also raises uric acid." },
   { k: "chol", n: "Cholesterol", u: "mg", lim: 300, g: "Limits", re: /cholesterol/, why: "Dietary cholesterol matters less than saturated fat, but keep moderate.", src: "Egg yolk, ghee, butter, cheese." },
   { k: "caffeine", n: "Caffeine", u: "mg", lim: 400, g: "Limits", re: /caffeine/, why: "Up to 400 mg/day is fine for most adults; late caffeine hurts sleep.", src: "Coffee (~80–100 mg/cup), tea (~40 mg), energy drinks, pre-workouts." }
 ];
 const MIK = Object.fromEntries(MI.map(x => [x.k, x]));
+// ---- personal targets: sex, age, pregnancy, conditions (profile) and lab flags (reports) adjust the base values above ----
+const MI_BASE = new Map(MI.map(m => [m.k, { t: m.t, ul: m.ul, cap: m.cap, lim: m.lim, note: m.note || "" }]));
+function personaliseMI(){
+  const H = window.HLP, pr = H?.profile?.() || {}, fl = H?.flags?.() || new Set(), fem = pr.sex === "female", age = H?.age?.() || 30;
+  for (const m of MI) { const b = MI_BASE.get(m.k); if (!b) continue; m.t = b.t; m.ul = b.ul; m.cap = b.cap; m.lim = b.lim; m.notes = b.note ? [b.note] : []; }
+  const set = (k, o) => { const m = MIK[k]; if (m) Object.assign(m, o); }, add = (k, t) => { const m = MIK[k]; if (m && m.notes) m.notes.push(t); };
+  if (fem) { set("vitA", { t: 840 }); set("vitC", { t: 65 }); set("b1", { t: 1.4 }); set("b2", { t: 1.9 }); set("b3", { t: 14 }); set("b6", { t: 1.9 }); set("b9", { t: 220 }); set("mg", { t: 370 });
+    set("fe", { t: 29 }); set("zn", { t: 13.2 }); set("k", { t: 2600 }); set("cr", { t: 25 }); set("mn", { t: 1.8 }); set("choline", { t: 425 }); set("fibre", { t: 25 }); set("omega3", { t: 1100 }); }
+  if (pr.sex === "male" && MIK.b9) set("b9", { t: 300 });
+  if ((fem && age >= 51) || age >= 71) set("ca", { t: 1200 });
+  if (fem && age >= 51) set("fe", { t: 11 });
+  if (age >= 71) set("vitD", { t: 20 });
+  if (fl.has("pregnant")) { set("b9", { t: 570 }); set("fe", { t: 27 }); set("i", { t: 220 }); set("choline", { t: 450 }); set("b12", { t: 2.6 }); set("caffeine", { lim: 200 });
+    add("vitA", "Pregnancy: avoid retinol (preformed vitamin A) supplements above the RDA."); add("caffeine", "Pregnancy: keep caffeine under 200 mg a day."); }
+  if (fl.has("breastfeeding")) { set("i", { t: 290 }); set("b9", { t: 330 }); set("b12", { t: 2.8 }); set("vitA", { t: 1300 }); }
+  const kcal = +N.plan.kcal || 2000;
+  // kidneys
+  if (fl.has("single_kidney") || fl.has("ckd")) {
+    set("ca", { cap: 2000 }); add("ca", "Kidney: get most of it from food; high-dose calcium supplements can raise kidney-stone risk.");
+    set("p", { cap: fl.has("ckd") ? 1000 : 1400 }); add("p", fl.has("ckd") ? "Kidney disease: phosphorus often needs limiting; follow your nephrologist's target and avoid phosphate additives (colas, processed cheese, packaged meats)." : "Kidney: no need to restrict with normal kidney function, but avoid phosphate additives (colas, processed cheese, packaged meats) and phosphorus supplements.");
+    set("vitC", { cap: fl.has("ckd") ? 500 : 1000 }); add("vitC", "Kidney: keep supplements under 500 mg a day; high doses raise oxalate and kidney-stone risk.");
+    add("mg", "Kidney: check magnesium supplements with your doctor (the kidneys clear excess magnesium).");
+    add("vitD", "Kidney: agree doses above 2,000 IU a day with your nephrologist.");
+    if (fl.has("ckd")) { set("k", { cap: 3000 }); add("k", "Kidney disease: potassium limits depend on your stage and blood potassium; follow your nephrologist's target. Avoid salt substitutes (KCl)."); }
+    else add("k", "Kidney: food potassium is helpful while kidney function is normal. Avoid potassium supplements and salt substitutes (KCl) unless your doctor agrees.");
+  }
+  if (fl.has("stones")) { set("vitC", { cap: Math.min(MIK.vitC.cap || 1000, 1000) }); add("vitC", "Kidney stones: high-dose vitamin C raises oxalate."); add("ca", "Kidney stones: don't cut dietary calcium; it binds oxalate in the gut. Avoid high-dose calcium supplements."); }
+  // heart, blood pressure, cholesterol
+  if (fl.has("htn") || fl.has("heart")) { if (!fl.has("ckd")) add("k", "Potassium-rich foods help lower blood pressure (unless your doctor has limited potassium)."); add("caffeine", "High blood pressure: caffeine can raise BP briefly; keep it moderate."); }
+  if (fl.has("chol") || fl.has("heart") || fl.has("t2d")) { set("satfat", { lim: Math.round(kcal * .07 / 9) }); add("satfat", `Kept under ~7% of calories because of ${fl.has("chol") ? "your cholesterol" : fl.has("heart") ? "heart health" : "diabetes"}.`); set("chol", { lim: 200 }); }
+  else { set("satfat", { lim: Math.round(kcal * .1 / 9) }); add("satfat", "Under 10% of calories (WHO)."); }
+  if (fl.has("tg") || fl.has("heart")) add("omega3", "Omega-3 (EPA/DHA) helps lower triglycerides.");
+  // blood sugar, liver, uric acid
+  if (fl.has("t2d") || fl.has("t1d") || fl.has("prediabetes") || fl.has("pcos")) { set("sugar", { lim: 25 }); set("fibre", { t: (MIK.fibre.t || 30) + 5 }); add("sugar", "Blood sugar: added sugar spikes glucose; keep it low and pair carbs with protein or fibre."); add("fibre", "Extra fibre slows sugar absorption."); add("cr", "Chromium supplements have weak evidence for blood sugar; don't rely on them."); }
+  if (fl.has("nafld") || fl.has("liver")) add("sugar", "Fatty liver: sugar (especially fructose) and alcohol add liver fat.");
+  if (fl.has("gout")) add("sugar", "Fructose (sugary drinks, juice) raises uric acid.");
+  // thyroid, blood
+  if (fl.has("hypo")) { add("i", "Hypothyroidism: iodised salt is enough; don't add iodine supplements unless your doctor says so."); add("ca", "If you take thyroxine, keep calcium and iron 4 hours away from it."); add("fe", "If you take thyroxine, keep iron 4 hours away from it."); }
+  if (fl.has("hyper")) add("i", "Hyperthyroidism: avoid iodine supplements and kelp.");
+  if (fl.has("anaemia")) add("fe", "Low haemoglobin: pair iron foods with vitamin C (lemon, amla) and keep tea/coffee away from meals.");
+  // lab-driven
+  if (fl.has("hcy")) { set("b9", { t: Math.max(MIK.b9.t, 400) }); add("b9", "400 µg is used because your homocysteine was high; B12 and B6 help too."); }
+  if (fl.has("lowD")) add("vitD", "Your vitamin D was low: a doctor-guided supplement is usually needed; food alone rarely fixes it.");
+  if (fl.has("lowB12")) add("b12", "Your B12 was low: follow your doctor's dose.");
+  if (["veg", "vegan", "jain"].includes(pr.diet)) add("b12", "Vegetarian diets have little B12, so most people need a supplement or fortified foods.");
+  for (const m of MI) if (m.notes) m.note = m.notes.join(" ");
+}
 // extra nutrients/actives found on supplement labels (creatine, CoQ10, boron, lutein…): defined once by Claude, saved in your nutrition plan
 const escRe = t => String(t).toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function syncExtras(){
@@ -1153,7 +1233,7 @@ function renderMicros(){
   const b = q("#nuMiEst"); if (b) b.onclick = () => estimateMicros(missing, true);
   q("#nuMiBack").onclick = () => { const all = N.entries.filter(e => e.meal !== "supplements" && !(e.micros || []).length); if (!all.length) { toast("Every logged food already has micronutrients."); return; } estimateMicros(all, true); };
   // estimate today's items automatically once per day view
-  if (missing.length && N.miView === "day" && !micState.busy && !micState.tried.has(N.day) && N.loaded && typeof S !== "undefined" && S.settings?.anthropic_key) { micState.tried.add(N.day); estimateMicros(missing, false); }
+  if (missing.length && N.miView === "day" && !micState.busy && !micState.tried.has(N.day) && N.loaded && typeof S !== "undefined" && window.hasAI?.()) { micState.tried.add(N.day); estimateMicros(missing, false); }
 }
 const micState = { busy: false, tried: new Set(), err: "" };
 async function estimateMicros(list, manual){
@@ -1245,7 +1325,7 @@ Description: """${text}"""
 Rules: split into separate items (one per product). Use any strength stated by the person (e.g. "60,000 IU per 5 ml", "500 mg tablet"); otherwise use the product's label if it is a known Indian or international brand, else a typical product of that kind. Give amounts FOR THE AMOUNT TAKEN. List every vitamin, mineral and active ingredient (creatine, caffeine, EPA/DHA, herbal extracts, probiotics in CFU…) with units mg, µg, g, IU or CFU as printed; do not list macros there. Macros (kcal, protein p, carbs c, fat f in g, sodium na in mg) only if meaningful, else 0.
 frequency = how the product is normally taken: "daily", "weekly", "fortnightly", "monthly" or "once".
 unit = one of: ${UNITS.join(", ")}, or "dose"; qty = how many of that unit were taken (5 ml → qty 5, unit "ml"; 2 capsules → qty 2, unit "capsule").
-Person: one underdeveloped kidney (normal eGFR), high uric acid, low vitamin D and B12 in recent tests. kidneyNote: one short neutral line if relevant (high-dose vitamin D, calcium, potassium, magnesium, creatine, protein powders, herbal blends), else "".
+${window.HLP?.personLine?.() || "Person: adult, no details given."} kidneyNote: one short neutral line if relevant (high-dose vitamin D, calcium, potassium, magnesium, creatine, protein powders, herbal blends), else "".
 Reply with ONLY JSON: {"items":[{"name":"","brand":"","qty":1,"unit":"dose","frequency":"daily","kcal":0,"p":0,"c":0,"f":0,"na":0,"micros":[{"n":"","amt":0,"unit":""}],"kidneyNote":"","note":"one short line, e.g. typical use"}]}`, null, 3000);
     const list = (Array.isArray(out?.items) ? out.items : out?.name ? [out] : []).filter(o => o && o.name).map(o => ({
       name: String(o.name).slice(0, 80), brand: String(o.brand || ""), qty: +o.qty > 0 ? +o.qty : 1, unit: UNITS.includes(o.unit) ? o.unit : "dose",
@@ -1306,7 +1386,7 @@ function unknownSuppNames(){
   return [...names];
 }
 async function classifyNew(){
-  if (extraState.busy || !N.loaded || typeof S === "undefined" || !S.settings?.anthropic_key) return;
+  if (extraState.busy || !N.loaded || typeof S === "undefined" || !window.hasAI?.()) return;
   const names = unknownSuppNames(); if (!names.length) return;
   extraState.busy = true;
   try {
@@ -1315,8 +1395,8 @@ async function classifyNew(){
     const out = await askJSON(`These ingredient names come from dietary supplement labels and don't match the person's nutrient list.
 Known nutrients (key=name): ${known}.
 Ingredients: ${sample.join("; ")}
-For each ingredient: if it is really one of the known nutrients (a form or salt, e.g. "Zinc bisglycinate" = zn, "Menaquinone-7" = vitK), give "same_as" with that key. Otherwise define it as a new tracked item for a 29-year-old man with ONE underdeveloped kidney (normal eGFR) and high uric acid:
-key (short camelCase), n (display name), u (the unit amounts are usually labelled in: mg, µg, g, IU or CFU), t (usual effective daily intake from studies, or null if none), ul (tolerable/safe upper limit per day or null), cap (lower kidney-aware limit if relevant, else null), why (one line: what it does), src (food sources or "supplement only"), note (one line on evidence and any kidney/uric-acid caution), aliases (2-6 lowercase name variants as they appear on labels).
+For each ingredient: if it is really one of the known nutrients (a form or salt, e.g. "Zinc bisglycinate" = zn, "Menaquinone-7" = vitK), give "same_as" with that key. Otherwise define it as a new tracked item for this person (${window.HLP?.personLine?.() || "an adult"}):
+key (short camelCase), n (display name), u (the unit amounts are usually labelled in: mg, µg, g, IU or CFU), t (usual effective daily intake from studies, or null if none), ul (tolerable/safe upper limit per day or null), cap (lower limit if one of this person's conditions needs it, else null), why (one line: what it does), src (food sources or "supplement only"), note (one line on evidence and any caution for this person's conditions or medicines), aliases (2-6 lowercase name variants as they appear on labels).
 Reply with ONLY JSON: {"items":[{"label":"exact ingredient name as given","same_as":"","key":"","n":"","u":"","t":null,"ul":null,"cap":null,"why":"","src":"","note":"","aliases":[]}]}`, null, 2500);
     const ex = { ...(N.plan.extraMicros || {}) }, al = { ...(N.plan.microAliases || {}) }, ign = [...(N.plan.microIgnore || [])];
     const num = v => v == null || v === "" || !isFinite(+v) ? null : +v;
@@ -1349,7 +1429,7 @@ const PAIR = {
         with: [["Copper (only with long-term zinc above 25 mg/day)", "Long-term high zinc can cause copper deficiency; many formulas add 1–2 mg copper.", /copper/]] },
   mg: { with: [["Vitamin D3", "Magnesium activates vitamin D; the two work together.", /vitamin d|d3/], ["Evening / bedtime", "Magnesium glycinate or citrate at night can support relaxation and sleep.", null]],
         apart: [["Zinc or calcium in large doses", "Very high doses compete for absorption.", /zinc|calcium/]] },
-  b12: { with: [["Folate (B9)", "B12 and folate work together to lower homocysteine (yours was high).", /folate|folic|methylfolate/], ["Vitamin B6", "B6 also helps clear homocysteine.", /b6|pyridox/]] },
+  b12: { with: [["Folate (B9)", "B12 and folate work together to lower homocysteine.", /folate|folic|methylfolate/], ["Vitamin B6", "B6 also helps clear homocysteine.", /b6|pyridox/]] },
   b9: { with: [["Vitamin B12", "Taking folate without enough B12 can mask a B12 deficiency; take them together.", /b12|cobalamin/]] },
   b6: { with: [["B12 and folate", "Together they lower homocysteine.", /b12|folate|folic/]] },
   vitC: { with: [["Iron", "Vitamin C boosts iron absorption.", /\biron\b|ferrous/]] },
@@ -1359,11 +1439,11 @@ const PAIR = {
 };
 // non-vitamin actives found in labels → short notes
 const ACTIVE = [
-  [/creatine/, "Creatine: improves strength and power output in training. Raises blood creatinine a little (a lab artefact, not kidney damage) — tell your doctor before kidney tests, and check with your nephrologist given the single kidney. Take daily with water; timing doesn't matter."],
+  [/creatine/, "Creatine: improves strength and power output in training. Raises blood creatinine a little (a lab artefact, not kidney damage) — tell your doctor before kidney tests, and check with your doctor if you have a kidney condition. Take daily with water; timing doesn't matter."],
   [/ashwagandha|withania/, "Ashwagandha: may lower stress/cortisol and modestly support sleep and testosterone. Avoid with thyroid medication changes without advice; pause if you get stomach upset."],
   [/curcumin|turmeric/, "Curcumin: anti-inflammatory; poorly absorbed alone — pair with black pepper (piperine) and fat."],
   [/caffeine|green tea extract/, "Caffeine: alertness and training performance; keep under 400 mg/day and stop 8 h before bed."],
-  [/whey|protein/, "Protein powder: counts toward your 110–120 g/day protein cap (uric acid, single kidney)."],
+  [/whey|protein/, "Protein powder: counts toward your daily protein target; stay under the cap shown in My plan, especially with a kidney condition."],
   [/electrolyte|potassium/, "Electrolytes/potassium: fine with normal kidney function, but don't take potassium supplements daily without your doctor."],
   [/probiotic|lactobac|bifido/, "Probiotics: gut health; benefits are strain-specific and modest."],
   [/melatonin/, "Melatonin: helps fall asleep; use 0.5–3 mg 30–60 min before bed, short-term."],
@@ -1398,14 +1478,14 @@ async function aboutSupp(id){
     <div class="small muted">${x.brand ? e2(x.brand) + " · " : ""}${e2(uLabel(x.takeQty, x.unit))} per dose · ${Math.max(1, +x.dosesPerDay || 1)}×/day${x.timing ? " · " + e2(x.timing) : ""}</div>
     <div class="nu-sec">What one dose gives you</div>
     <div class="nu-kv">${pd.kcal || pd.p || pd.c || pd.f ? `<div>Calories · protein · carbs · fat</div><div>${nf(pd.kcal || 0)} kcal · ${r1(pd.p || 0)} · ${r1(pd.c || 0)} · ${r1(pd.f || 0)} g</div>` : ""}${compRows || `<div>No vitamins or minerals listed</div><div></div>`}</div>
-    <div id="siAI">${ins ? insightHTML({ ...ins }, skipK) : `<div class="notice" style="margin-top:12px">${S.settings?.anthropic_key ? "Working out what it does for you…" : "Add your Claude API key in Settings to see what this supplement does for your body."}</div>`}</div>
+    <div id="siAI">${ins ? insightHTML({ ...ins }, skipK) : `<div class="notice" style="margin-top:12px">${window.hasAI?.() ? "Working out what it does for you…" : "Add your Claude API key in Settings to see what this supplement does for your body."}</div>`}</div>
     ${pairs.length ? `<div class="nu-sec">Best taken with</div>${pairs.map(p => `<div class="si-row"><b>${e2(p.what)}</b>${p.have ? ` ${chipH("ok", p.have)}` : ""}<div class="small muted">${e2(p.why)}</div></div>`).join("")}` : ""}
     ${apart.length ? `<div class="nu-sec">Keep about 2 hours apart from</div>${apart.map(p => `<div class="si-row"><b>${e2(p.what)}</b>${p.clash ? ` ${chipH("border", "In your stack")}` : ""}<div class="small muted">${e2(p.why)}</div></div>`).join("")}` : ""}
     ${actives.length ? `<div class="nu-sec">Other ingredients</div>${actives.map(a => `<p class="small" style="margin:4px 0">${e2(a)}</p>`).join("")}` : ""}
     ${x.kidneyNote ? `<div class="notice" style="margin-top:10px">${chipH("border", "Kidney")} ${e2(x.kidneyNote)}</div>` : ""}
     <div class="row" style="justify-content:space-between;margin-top:12px"><span class="small muted">General information, not medical advice. Effects of supplements are usually modest and mainly help if you're low.</span><button class="btn" id="siRe">Refresh</button></div>`);
   bg.querySelector("#siRe").onclick = () => genInsight(x0, x, bg, skipK);
-  if (!ins && S.settings?.anthropic_key) genInsight(x0, x, bg, skipK);
+  if (!ins && window.hasAI?.()) genInsight(x0, x, bg, skipK);
 }
 function insightHTML(i, skip = []){
   const list = a => (a || []).filter(Boolean).map(t => `<li>${e2(t)}</li>`).join("");
@@ -1428,13 +1508,13 @@ async function genInsight(x0, x, bg, skipK = []){
     const stack = suppList().filter(s => s.active !== false && s.id !== x0.id).map(s => s.name).join(", ");
     const out = await askJSON(`Explain a dietary supplement for the person taking it, based on its exact composition. Be accurate, evidence-based and calm; don't overstate effects. Effects are mostly meaningful when correcting a deficiency.
 Supplement: ${x.name}${x.brand ? ` (${x.brand})` : ""}. Per dose (${uLabel(x.takeQty, x.unit)}, ${Math.max(1, +x.dosesPerDay || 1)}×/day): ${comp || "no vitamins/minerals listed"}; macros ${JSON.stringify(x.dose || {})}.
-Person: 29-year-old Indian vegetarian man, gym 2–3×/week, one underdeveloped kidney with normal eGFR, high uric acid. Recent labs: ${labs || "not available"}. Other supplements he takes: ${stack || "none"}.
+${window.HLP?.personLine?.() || "Person: adult, no details given."} Recent labs: ${labs || "not available"}. Other supplements they take: ${stack || "none"}.
 Reply with ONLY JSON:
 {"functions":["3-6 short bullets: which body functions/systems it supports"],
  "physical":"energy, muscle, bones, recovery, skin/hair etc. — or empty if none",
  "sexual":"libido, testosterone, erectile function, fertility/sperm — only if there is real evidence, else empty",
  "emotional":"mood, stress, sleep, focus — or empty",
- "forYou":"1-2 sentences linking it to his labs (e.g. low vitamin D or B12, high homocysteine), or empty",
+ "forYou":"1-2 sentences linking it to their labs, conditions or medicines (including any interaction with their medicines), or empty",
  "timing":"best time and with/without food",
  "pairWith":[{"with":"","why":""}],
  "cautions":["dose/kidney/interaction cautions, short"],
@@ -1449,4 +1529,6 @@ q("#nuMicro").addEventListener("click", ev => { const b = ev.target.closest("[da
 qa("[data-miv]").forEach(b => b.onclick = () => { N.miView = b.dataset.miv; renderMicros(); });
 
 NU.render();
+// the Ledger may have finished loading before this script arrived
+if (signedIn() && S.loadedR && !N.loaded) Promise.resolve(NU.load()).finally(() => window.dispatchEvent(new Event("hl:loaded")));
 })();

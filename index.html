@@ -444,6 +444,7 @@ header.top.compact .refresh{width:30px;height:30px}
       <button class="tab" role="tab" data-tab="overview" aria-selected="true">Overview</button>
       <button class="tab" role="tab" data-tab="activity" aria-selected="false">Activity</button>
       <button class="tab" role="tab" data-tab="nutrition" aria-selected="false">Daily nutrition</button>
+      <button class="tab" role="tab" data-tab="meds" aria-selected="false">Medicines</button>
       <button class="tab" role="tab" data-tab="readiness" aria-selected="false">Readiness</button>
       <button class="tab" role="tab" data-tab="results" aria-selected="false">Latest results</button>
       <button class="tab" role="tab" data-tab="body" aria-selected="false">Body scan</button>
@@ -660,16 +661,28 @@ header.top.compact .refresh{width:30px;height:30px}
     </div>
   </section>
   <!-- SETTINGS -->
+  <!-- MEDICINES (rendered by people.js) -->
+  <section class="view" id="v-meds" hidden></section>
+
   <section class="view" id="v-settings" hidden>
-    <div class="card">
-      <div class="card-h"><h2>Apple Health sync</h2><span class="hint" id="syncHint"></span></div>
-      <div id="syncSetup"><div class="empty">Loading…</div></div>
-    </div>
+    <div class="card" id="profileCard"></div>
+    <div class="card" id="peopleCard" hidden></div>
     <div class="card" id="glCard">
-      <div class="card-h"><h2>Fitbit, direct from Google</h2><span class="hint" id="glHint"></span></div>
-      <p class="small" style="margin:0 0 10px">Reads your Fitbit's steps, heart rate, resting heart rate, HRV, blood oxygen, breathing rate and sleep straight from your Google account every 15 minutes, without waiting for Apple Health, and can send your Daily nutrition log back to Fitbit. Once connected, it becomes your primary device.</p>
-      <div id="glBox"><div class="empty small">Loading…</div></div>
+      <div class="card-h"><h2>Your fitness tracker</h2><span class="hint" id="glHint"></span></div>
+      <p cla<p class="small" style="margin:0 0 10px">Works with almost any tracker, free, through the <b>Google Health</b> app (formerly the Fitbit app). Steps, heart rate, sleep and more arrive here every 15 minutes, and your food log can be sent back. No tracker? Skip this; nutrition, medicines and reports all work without one.</p>
+      <details class="small" style="margin:0 0 12px"><summary style="cursor:pointer;font-weight:600">How to connect your device</summary>
+        <div style="margin-top:8px;display:grid;gap:10px">
+          <div><b>Fitbit or Pixel Watch</b>: tap <b>Connect</b> below and sign in with the Google account your Fitbit uses. That's all.</div>
+          <div><b>Apple Watch / iPhone</b>: install the free <b>Google Health</b> app on your iPhone, sign in with a Google account, then in it go to <b>Connections → Apple Health</b> and allow access. Keep the Google Health app installed so it can refresh. Then tap <b>Connect</b> below with the same Google account.</div>
+          <div><b>Samsung Galaxy Watch</b>: in Samsung Health → Settings → <b>Health Connect</b>, allow sharing. Install <b>Google Health</b>, link Health Connect inside it, then tap <b>Connect</b> below.</div>
+          <div><b>Garmin, Mi / Xiaomi, Amazfit / Zepp, Oura, Whoop</b>: in your tracker's app turn on sharing to <b>Health Connect</b> (Android) or <b>Apple Health</b> (iPhone). Then do the Google Health step above for your phone and tap <b>Connect</b> below.</div>
+          <div class="muted">What arrives depends on the brand (e.g. Garmin doesn't share HRV or blood oxygen). Google shows a "this app isn't verified" screen; tap <b>Advanced → Go to Health Ledger</b>. Everything here is free.</div>
+        </div></details> <div id="glBox"><div class="empty small">Loading…</div></div>
       <div class="small" id="glMsg" style="margin-top:6px"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h2>Apple Health via Health Auto Export (optional)</h2><span class="hint" id="syncHint"></span></div>
+      <div id="syncSetup"><div class="empty">Loading…</div></div>
     </div>
     <div class="card">
       <div class="card-h"><h2>Primary device</h2><span class="hint" id="pdState"></span></div>
@@ -683,8 +696,8 @@ header.top.compact .refresh{width:30px;height:30px}
       <div id="dcOut"><div class="empty small">Tap “Check now”.</div></div>
     </div>
     <div class="card">
-      <div class="card-h"><h2>Reading reports with Claude</h2><span class="hint" id="akeyState"></span></div>
-      <p class="small" style="margin:0 0 10px">Uploaded reports are read by Claude through your own Anthropic API key. The key is saved in your private database (only your account can read it) and is sent only to Anthropic. Create one at console.anthropic.com → API keys.</p>
+      <div class="card-h"><h2>Your own Claude key (optional)</h2><span class="hint" id="akeyState"></span></div>
+      <p class="small" style="margin:0 0 10px">AI features (reading reports, food and label estimates, questions) work without a key here: they use the shared key set up by whoever runs this Health Ledger, with a daily allowance per person. If you add your own Anthropic API key, it is used instead, with no daily limit. The key is saved in your private database (only your account can read it) and is sent only to Anthropic. <span id="aiUse"></span></p>
       <div class="row"><input type="password" id="akey" placeholder="sk-ant-…" autocomplete="off" style="flex:1 1 260px"><button class="btn primary" id="akeySave">Save key</button><button class="btn" id="akeyTest">Test</button></div>
       <div class="small" id="akeyMsg" style="margin-top:6px"></div>
       <label class="small" for="about" style="display:block;margin-top:14px;font-weight:600">About you <span class="muted" style="font-weight:400">(age, diet, lifestyle; gives Claude context when answering)</span></label>
@@ -713,11 +726,14 @@ header.top.compact .refresh{width:30px;height:30px}
       <button class="btn primary" type="submit">Connect</button>
     </form>
     <form id="gateLogin" hidden class="gate-card" style="width:100%">
+      <div class="row" role="tablist" style="gap:6px"><button type="button" class="pill-btn" id="lgModeIn" aria-pressed="true">Sign in</button><button type="button" class="pill-btn" id="lgModeUp" aria-pressed="false">Create account</button></div>
+      <p class="small muted" id="lgIntro" style="margin:0">Welcome back. Sign in to see your health data.</p>
+      <label id="lgNameL" hidden>Your name<input type="text" id="lgName" autocomplete="name" placeholder="e.g. Rahul"></label>
       <label>Email<input type="email" id="lgEmail" autocomplete="username" required></label>
       <label>Password<input type="password" id="lgPass" autocomplete="current-password" minlength="8" required></label>
       <button class="btn primary" type="submit" id="lgBtn">Sign in</button>
-      <button class="btn" type="button" id="lgCreate">Create my account (first time only)</button>
       <div class="small" id="lgMsg"></div>
+      <p class="small muted" style="margin:0">Your data is private to your account. Nobody else using this site can see it.</p>
     </form>
   </div>
 </div>
@@ -1170,7 +1186,7 @@ function go(tab, anchor){
   S.tab = tab;
   document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.tab === tab)));
   document.querySelectorAll("section.view").forEach(s => s.hidden = s.id !== "v-" + tab);
-  if (tab === "history") renderHistory(); if (tab === "body") renderBody(); if (tab === "activity") renderActivity(); if (tab === "readiness") renderReadiness(); if (tab === "settings") renderSettings(); if (tab === "nutrition") window.NUT?.render();
+  if (tab === "history") renderHistory(); if (tab === "body") renderBody(); if (tab === "activity") renderActivity(); if (tab === "readiness") renderReadiness(); if (tab === "settings") renderSettings(); if (tab === "nutrition") window.NUT?.render(); if (tab === "meds") window.HLP?.renderMeds();
   try { localStorage.setItem("hl-tab", tab); } catch(e) {}
   if (anchor) { const el = document.getElementById("cat-" + anchor); if (el) setTimeout(() => el.scrollIntoView({behavior:"smooth", block:"start"}), 30); }
   else window.scrollTo({top:0});
@@ -1403,7 +1419,8 @@ async function loadAll(){
       SB.from("user_settings").select("*").maybeSingle(),
       SB.from("ingest_keys").select("key,created_at,last_used").order("created_at"),
       loadMarkerInfo().catch(() => {}),
-      loadGoogle().catch(() => {})
+      loadGoogle().catch(() => {}),
+      window.HLP?.load().catch(() => {})
     ]);
     if (r.error) throw r.error;
     S.reports = r.data.map(x => ({ ...x.doc, id: x.id, type: x.type, date: x.date, filePath: x.file_path }));
@@ -1416,7 +1433,7 @@ async function loadAll(){
     S.loadedR = S.loadedA = true;
     notice("");
     renderAll();
-    window.NUT?.load();
+    Promise.resolve(window.NUT?.load()).finally(() => window.dispatchEvent(new Event("hl:loaded")));
   } catch (e) {
     notice("Couldn't load your data: " + esc(e.message || e.code || e) + ". Check your connection and tap refresh.");
   } finally { loading = false; btn?.classList.remove("spin"); }
@@ -1514,9 +1531,28 @@ function renderReports(){
 }
 
 /* ---- Claude API (your own key) ---- */
+// AI is available with your own key (Settings) or through the shared key on the server (claude-proxy, daily cap)
+const hasAI = () => !!S.settings?.anthropic_key || (S.ai?.ready !== false && !(S.ai && !S.ai.admin && S.ai.cap === 0));
+window.hasAI = hasAI; window.aiStatusFresh = () => aiStatus();
+async function aiStatus(){
+  try { const { data } = await SB.functions.invoke("claude-proxy", { body: { action: "status" } }); S.ai = data?.ok ? data : { ready: false }; }
+  catch { S.ai = { ready: false }; }
+  return S.ai;
+}
 async function claudeCall(content, { maxTokens = 2000 } = {}){
   const key = S.settings.anthropic_key;
-  if (!key) throw { code: "no_key", message: "Add your Claude API key in Settings first." };
+  if (!key) {
+    let data;
+    try { ({ data } = await SB.functions.invoke("claude-proxy", { body: { model: CLAUDE_MODEL, max_tokens: maxTokens, messages: [{ role: "user", content }] } })); }
+    catch (e) { throw { code: "network", message: "Couldn't reach the AI service. Check your internet connection." }; }
+    if (!data) throw { code: "no_proxy", message: "AI isn't set up for your account yet. Ask the account owner, or add your own Claude API key in Settings." };
+    if (!data.ok) {
+      if (/credit balance/i.test(data.message || "")) throw { code: "no_credit", message: "The shared Claude credit has run out. Ask the account owner to top up at console.anthropic.com." };
+      throw { code: data.code || "proxy", message: data.message || "AI error" };
+    }
+    if (S.ai) S.ai.used = data.used;
+    return { text: (data.content || []).filter(b => b.type === "text").map(b => b.text).join(""), truncated: data.stop_reason === "max_tokens" };
+  }
   let res;
   try {
     res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST",
@@ -1543,7 +1579,7 @@ async function ask(){
   const q = $("#askQ").value.trim(); if (!q) { $("#askQ").focus(); return; }
   if (asking) return; asking = true;
   $("#askBtn").disabled = true; $("#askOut").textContent = "Thinking…";
-  const about = (S.settings.about || "").trim();
+  const about = [(window.HLP?.personLine() || ""), (S.settings.about || "").trim()].filter(Boolean).join(" ");
   const prompt = `You are helping a person understand their own lab history.${about ? " About them: " + about + "." : ""} Be direct, specific to THEIR numbers and trends, and practical. Use short paragraphs or a short list; under 220 words. Reference actual values and dates. Do not diagnose; say when something needs a doctor. Plain text only, no markdown headings or tables.\n\nTHEIR DATA (all tests, oldest to newest):\n${summaryForClaude()}\n\nQUESTION: ${q}`;
   try { const { text } = await claudeCall([{ type: "text", text: prompt }], { maxTokens: 1200 }); $("#askOut").textContent = text.replace(/\*\*/g, ""); }
   catch (e) { $("#askOut").textContent = e.message || "Couldn't get an answer right now."; }
@@ -1555,7 +1591,7 @@ $("#askBtn").onclick = ask; $("#askQ").onkeydown = e => { if (e.key === "Enter")
 async function handleUpload(file){
   const prog = $("#upProg"), bar = prog.querySelector("i"); const step = (p, msg) => { prog.hidden = false; bar.style.width = p + "%"; toastMsg("#upMsg", msg); };
   if (file.size > 30*1024*1024) return toastMsg("#upMsg", "That file is over 30 MB. Export a smaller PDF (or just the results pages) and try again.", true);
-  if (!S.settings.anthropic_key) {
+  if (!hasAI()) {
     toastMsg("#upMsg", `Claude can read reports for you once your API key is saved in <a href="#settings">Settings</a>. For now, enter the values by hand; the file is still kept.`);
     return openReview(file, { kind: "blood", date: todayISO(), params: [] });
   }
@@ -1746,8 +1782,9 @@ function wireCopy(root){ root.querySelectorAll("[data-copy]").forEach(b => b.onc
 async function renderSettings(){
   $("#acctInfo").textContent = S.email ? `Signed in as ${S.email}. Data lives in your Supabase project ${CFG.url.replace(/^https:\/\//, "")}.` : "";
   $("#about").value = S.settings.about || "";
-  loadSources(); renderGoogle();
-  $("#akeyState").textContent = S.settings.anthropic_key ? `Key saved (…${S.settings.anthropic_key.slice(-4)})` : "No key saved";
+  loadSources(); renderGoogle(); window.HLP?.renderSettingsCards();
+  $("#akeyState").textContent = S.settings.anthropic_key ? `Key saved (…${S.settings.anthropic_key.slice(-4)})` : "Using the shared key";
+  { const el = $("#aiUse"); if (el) el.innerHTML = S.settings.anthropic_key ? "" : S.ai?.ready ? (S.ai.admin ? "<b>Shared key: on</b> (you are not limited)." : `<b>Today: ${S.ai.used || 0} of ${S.ai.cap} AI actions used.</b>`) : S.ai ? `<b style="color:var(--bad)">The shared key isn't set up yet.</b>` : ""; }
   const box = $("#syncSetup");
   if (!S.uid) { box.innerHTML = ""; return; }
   const key = S.sync.keys[S.sync.keys.length - 1]?.key;
@@ -1867,24 +1904,40 @@ $("#gateCfg").onsubmit = e => {
   location.reload();
 };
 $("#gateLogin").onsubmit = async e => {
-  e.preventDefault(); $("#lgBtn").disabled = true; toastMsg("#lgMsg", "Signing in…");
+  e.preventDefault(); if (lgMode === "up") return createAccount(); $("#lgBtn").disabled = true; toastMsg("#lgMsg", "Signing in…");
   const { data, error } = await SB.auth.signInWithPassword({ email: $("#lgEmail").value.trim(), password: $("#lgPass").value });
   $("#lgBtn").disabled = false;
   if (error) return toastMsg("#lgMsg", error.message === "Invalid login credentials" ? "Email or password is wrong." : esc(error.message), true);
   await onSignedIn(data.session);
 };
-$("#lgCreate").onclick = async () => {
-  const email = $("#lgEmail").value.trim(), pw = $("#lgPass").value;
-  if (!email || pw.length < 8) return toastMsg("#lgMsg", "Enter your email and a password of at least 8 characters, then tap Create.", true);
-  toastMsg("#lgMsg", "Creating account…");
-  const { data, error } = await SB.auth.signUp({ email, password: pw });
-  if (error) return toastMsg("#lgMsg", /not allowed|disabled/i.test(error.message) ? "New sign-ups are switched off for this app. Sign in with your existing account." : esc(error.message), true);
+let lgMode = "in";
+function setLgMode(m){
+  lgMode = m; const up = m === "up";
+  $("#lgModeIn").setAttribute("aria-pressed", String(!up)); $("#lgModeUp").setAttribute("aria-pressed", String(up));
+  $("#lgNameL").hidden = !up; $("#lgName").required = up;
+  $("#lgPass").autocomplete = up ? "new-password" : "current-password";
+  $("#lgBtn").textContent = up ? "Create my account" : "Sign in";
+  $("#lgIntro").textContent = up ? "New here? Create your account; next you'll add your age, height, weight and any health conditions so your targets are set for you." : "Welcome back. Sign in to see your health data.";
+  toastMsg("#lgMsg", "");
+}
+$("#lgModeIn").onclick = () => setLgMode("in"); $("#lgModeUp").onclick = () => setLgMode("up");
+try { if (/[?&]signup\b/.test(location.search)) setLgMode("up"); } catch (e) {}
+async function createAccount(){
+  const name = $("#lgName").value.trim(), email = $("#lgEmail").value.trim(), pw = $("#lgPass").value;
+  if (!name) return toastMsg("#lgMsg", "Add your name.", true);
+  if (!email || pw.length < 8) return toastMsg("#lgMsg", "Enter your email and a password of at least 8 characters.", true);
+  $("#lgBtn").disabled = true; toastMsg("#lgMsg", "Creating your account…");
+  const { data, error } = await SB.auth.signUp({ email, password: pw, options: { data: { name }, emailRedirectTo: location.origin + location.pathname } });
+  $("#lgBtn").disabled = false;
+  if (error) return toastMsg("#lgMsg", /already registered|already exists/i.test(error.message) ? "There's already an account with this email. Tap Sign in instead." : /not allowed|disabled/i.test(error.message) ? "New sign-ups are switched off for this app right now." : /not authorized|sending/i.test(error.message) ? "Couldn't send the confirmation email. Ask the person who runs this site to switch off email confirmation or set up email sending." : esc(error.message), true);
   if (data.session) return onSignedIn(data.session);
-  toastMsg("#lgMsg", "Account created. Supabase sent a confirmation email; confirm it, then sign in here. (To skip this, turn off “Confirm email” in Supabase → Authentication → Providers → Email.)");
-};
+  if (data.user && !(data.user.identities || []).length) return toastMsg("#lgMsg", "There's already an account with this email. Tap Sign in instead.", true);
+  toastMsg("#lgMsg", "Account created. Check your inbox for a confirmation email, tap the link, then sign in here.");
+}
 async function onSignedIn(session){
-  S.uid = session.user.id; S.email = session.user.email;
+  S.uid = session.user.id; S.email = session.user.email; S.meta = session.user.user_metadata || {};
   $("#gate").hidden = true;
+  aiStatus();
   await loadAll();
   googleReturn();
 }
@@ -1911,7 +1964,7 @@ async function renderGoogle(){
   if (g?.missing) { box.innerHTML = `<div class="notice">Run <b>11-fitbit-direct.sql</b> in Supabase first (see the setup steps).</div>`; $("#glHint").textContent = "Not set up"; return; }
   if (!g) {
     $("#glHint").textContent = "Not connected";
-    box.innerHTML = `<button class="btn primary" id="glConnect" type="button">Connect Fitbit (Google account)</button>`;
+    box.innerHTML = `<button class="btn primary" id="glConnect" type="button">Connect (Google Health account)</button>`;
     $("#glConnect").onclick = googleConnect; return;
   }
   const fresh = g.last_sync && Date.now() - new Date(g.last_sync) < 45 * 60e3;
@@ -1928,7 +1981,7 @@ async function renderGoogle(){
   $("#glSync").onclick = async () => { const b = $("#glSync"); b.disabled = true; toastMsg("#glMsg", "Fetching from Google…");
     try { const r = await glFn({ action: "sync", days: 3 }); toastMsg("#glMsg", `Done: ${r.records} records.`); await loadAll(); } catch (e) { toastMsg("#glMsg", esc(e.message), true); } finally { b.disabled = false; renderGoogle(); } };
   $("#glRe").onclick = googleConnect;
-  $("#glOff").onclick = async () => { if (!confirm("Disconnect Fitbit? Data already saved stays.")) return;
+  $("#glOff").onclick = async () => { if (!confirm("Disconnect your tracker? Data already saved stays.")) return;
     try { await glFn({ action: "disconnect" }); toastMsg("#glMsg", "Disconnected. Primary device reset to “Combine all devices”."); await loadAll(); } catch (e) { toastMsg("#glMsg", esc(e.message), true); } renderGoogle(); };
 }
 function glPushHTML(g){
@@ -2000,7 +2053,7 @@ async function googleReturn(){
 /* ================= Readiness (WHOOP-style) ================= */
 S.rdOff = 0; S.rdRange = 30; S.hrSamples = null; let hrLoading = null; let rdMemo = {};
 const rdFirstDay = () => Object.keys(S.activity).sort()[0] || todayISO();
-const rdAge = () => { const m = String(S.settings.about || "").match(/(\d{2})\s*(?:-?\s*(?:year|yr|y\/o|yo)|,)/i); const a = m ? +m[1] : 30; return a >= 15 && a <= 90 ? a : 30; };
+const rdAge = () => { const pa = window.HLP?.age(); if (pa) return pa; const m = String(S.settings.about || "").match(/(\d{2})\s*(?:-?\s*(?:year|yr|y\/o|yo)|,)/i); const a = m ? +m[1] : 30; return a >= 15 && a <= 90 ? a : 30; };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const dayShift = (d, n) => iso(new Date(pd(d).getTime() + n * 864e5));
 async function loadHrSamples(){
@@ -2505,7 +2558,7 @@ function openMarker(key){
         <section class="mx-box"><h3>If it's low</h3><p>${esc(info.low || "—")}</p></section>
       </div>
       ${info.affects ? `<section><h3>What moves it</h3><p>${esc(info.affects)}</p></section>` : ""}`
-    : `<section id="mxGenBox"><div class="notice">${S.settings?.anthropic_key ? "Writing an explanation for this test…" : "There's no built-in explanation for this test yet. Add your Claude API key in Settings and one will be written and saved the first time you open it."}</div></section>`;
+    : `<section id="mxGenBox"><div class="notice">${hasAI() ? "Writing an explanation for this test…" : "There's no built-in explanation for this test yet. Add your Claude API key in Settings and one will be written and saved the first time you open it."}</div></section>`;
 
   $("#sheetRoot").innerHTML = `<div class="sheet-bg" id="mxBg"><div class="sheet mx" role="dialog" aria-modal="true" aria-labelledby="mxT">
     <div class="card-h" style="margin:0;align-items:flex-start">
@@ -2534,20 +2587,20 @@ function openMarker(key){
   $("#mxX").focus();
   const ch = $("#mxChart");
   if (ch) lineChart(ch, s.map(e => ({ x: e.date, y: numVal(e.p.value), st: statusOf(e.p) })).filter(x => x.y != null), { low: p.low, high: p.high, unit: p.unit, h: 170, aria: `${p.name} over time` });
-  if (!info && S.settings?.anthropic_key) genMarkerInfo([key]).then(() => { if (mxKey === key && markerInfo(key)) openMarker(key); })
+  if (!info && hasAI()) genMarkerInfo([key]).then(() => { if (mxKey === key && markerInfo(key)) openMarker(key); })
     .catch(e => { const b = $("#mxGenBox"); if (b && mxKey === key) b.innerHTML = `<div class="notice">Couldn't write an explanation: ${esc(e.message || e.code || e)}</div>`; });
 }
 
 /* Explanations for tests not in the built-in list: written once by Claude, saved to your marker_info table */
 async function genMarkerInfo(keys){
   keys = [...new Set(keys)].filter(k => !markerInfo(k) && D?.series[k] && !mxGen[k]);
-  if (!keys.length || !S.settings?.anthropic_key) return;
+  if (!keys.length || !hasAI()) return;
   keys.forEach(k => mxGen[k] = true);
   try {
     for (let i = 0; i < keys.length; i += 12) {
       const chunk = keys.slice(i, i + 12);
       const list = chunk.map(k => { const p = D.latest[k].p; return `- key "${k}": ${p.name} (unit: ${p.unit || "none"}; lab range: ${p.ref || "none"})`; }).join("\n");
-      const prompt = `You write plain-English explanations of blood-test markers for an adult man in India reading his own lab report. For each marker below, return general educational information (not advice about his values).
+      const prompt = `You write plain-English explanations of blood-test markers for ${window.HLP?.who() ? "a " + window.HLP.who() : "an adult"} in India reading their own lab report. For each marker below, return general educational information (not advice about his values).
 
 ${list}
 
@@ -2595,6 +2648,7 @@ function bodyNums(scan){
   const pctStd = k => { const m = String(bp[k]?.ref || "").match(/(\d+(?:\.\d+)?)\s*%/); return m ? +m[1] : null; };
   const w = v("weight"), bmi = v("bmi");
   let h = w && bmi ? Math.sqrt(w / bmi) * 100 : null;
+  if (!h) h = window.HLP?.profile()?.heightCm || null;
   if (!h) { const m = String(S.settings?.about || "").match(/(1[4-9]\d|2[0-2]\d)\s*cm/); h = m ? +m[1] : 175; }
   return { bp, h, w, bmi, bfr: v("bfr"), fat: v("fat_mass"), ffm: v("ffm"), skm: v("skm"), visceral: v("visceral"), whr: v("whr"), target: v("target_weight"),
     trunk: v("seg_fat_trunk"), arms: v("seg_fat_arms"), legs: v("seg_fat_legs"), trunkPct: pctStd("seg_fat_trunk"), armsPct: pctStd("seg_fat_arms"), legsPct: pctStd("seg_fat_legs") };
@@ -2966,7 +3020,7 @@ renderAll();
   if (!window.supabase || !window.supabase.createClient) { notice("Couldn't load the Supabase library. Check your internet connection and reload."); return; }
   if (!CFG.url || !CFG.key) { showGate("cfg"); return; }
   SB = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "hl-auth" } });
-  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { window.NUT?.reset(); S.uid = null; S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
+  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { window.NUT?.reset(); window.HLP?.reset(); S.uid = null; S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
   const { data: { session } } = await SB.auth.getSession();
   if (!session) showGate("login"); else await onSignedIn(session);
 })();
@@ -3046,7 +3100,8 @@ renderAll();
   tc(); matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", tc);
 })();
 </script>
-<script src="foods.js?v=20261019"></script>
-<script src="nutrition.js?v=20261019b"></script>
+<script src="foods.js?v=20261019c"></script>
+<script src="people.js?v=20261019f"></script>
+<script src="nutrition.js?v=20261019c"></script>
 </body>
 </html>
