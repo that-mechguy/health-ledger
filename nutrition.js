@@ -212,7 +212,7 @@ root.innerHTML = `
         <div class="card-h"><h2>Log food</h2><span class="hint" id="nuLogHint"></span></div>
         <div class="nu-chips" id="nuMeals"></div>
         <div class="nu-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
-          <input id="nuSearch" type="search" autocomplete="off" placeholder="Search 500 foods: dosa, biryani, Big Mac…" aria-label="Search the food database"></div>
+          <input id="nuSearch" name="nu-food-query" type="search" autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Search 500 foods: dosa, biryani, Big Mac…" aria-label="Search the food database"></div>
         <div class="nu-res" id="nuRes" hidden></div>
         <div class="nu-row"><button class="btn primary" id="nuPack" style="flex:1">${CAM}Packaged food: label / barcode</button></div>
         <div class="nu-sec">Or describe it, and Claude estimates</div>
@@ -601,6 +601,8 @@ function searchFoods(s){
   return FD.filter(x => t.every(w => x.hay.includes(w))).map(x => { const nn = normQ(x.name); return { x, s: (nn.startsWith(t[0]) ? 0 : 1) + (nn.includes(nq) ? 0 : 1) + x.name.length / 200 }; }).sort((a, b) => a.s - b.s).map(r => r.x);
 }
 let sT; q("#nuSearch").oninput = () => { clearTimeout(sT); sT = setTimeout(renderRes, 120); };
+// browsers sometimes autofill the login email into this box; clear that
+for (const ms of [300, 1200]) setTimeout(() => { const el = q("#nuSearch"); if (el && /^\S+@\S+\.\S+$/.test(el.value)) { el.value = ""; renderRes(); } }, ms);
 function renderRes(){
   const v = q("#nuSearch").value, box = q("#nuRes"), res = searchFoods(v);
   if (!v.trim()) { box.hidden = true; box.innerHTML = ""; return; }
@@ -1104,6 +1106,7 @@ function microStatus(m, r){
   if (m.lim != null) { const f = v / m.lim; return f > 1 ? ["out", "Over limit", f] : f > .8 ? ["border", "Near limit", f] : ["ok", "Under limit", f]; }
   if (!m.t) { const top = m.cap || m.ul; if (m.ul && v > m.ul) return ["out", "Above safe limit", 1]; if (m.cap && v > m.cap) return ["border", "Above your kidney-aware limit", 1]; return ["ok", v ? "Tracked" : "None today", top ? v / top : v ? 1 : 0]; }
   const scoped = m.ulSupp ? (r.supp[m.k] || 0) : v;
+  if (m.ul && (r.supp[m.k] || 0) > m.ul * 20) return ["border", "Check the unit on the label", v / m.t];   // e.g. "10 mg" saved where the label says 10 mcg
   if (m.ul && scoped > m.ul) return ["out", m.ulSupp ? "Supplements above safe limit" : "Above safe limit", v / m.t];
   if (m.cap && v > m.cap) return ["border", "Above your kidney-aware limit", v / m.t];
   const f = v / m.t; return f >= .9 ? ["ok", "Met", f] : f >= .5 ? ["border", "Getting there", f] : ["low", "Low", f];
