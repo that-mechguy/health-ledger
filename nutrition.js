@@ -212,7 +212,7 @@ root.innerHTML = `
         <div class="card-h"><h2>Log food</h2><span class="hint" id="nuLogHint"></span></div>
         <div class="nu-chips" id="nuMeals"></div>
         <div class="nu-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
-          <input id="nuSearch" name="nu-food-query" type="search" autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Search 500 foods: dosa, biryani, Big Mac…" aria-label="Search the food database"></div>
+          <input id="nuSearch" name="nu-food-query" type="search" autocomplete="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="Search 1,000 foods & drinks: dosa, biryani, Kingfisher…" aria-label="Search the food database"></div>
         <div class="nu-res" id="nuRes" hidden></div>
         <div class="nu-row"><button class="btn primary" id="nuPack" style="flex:1">${CAM}Packaged food: label / barcode</button></div>
         <div class="nu-sec">Or describe it, and Claude estimates</div>
@@ -605,8 +605,8 @@ function setSt(el, html, bad){ el.className = "nu-status" + (bad ? " err" : "");
 
 /* ---------- food database search ---------- */
 const CATS = window.NU_FOOD_CATS || {};
-const FD = (window.NU_FOODS || []).map(([name, local, cat, sub, chain, servDesc, servG, kcal, p, c, f, na], i) =>
-  ({ i, name, local, cat, sub, chain, servDesc, servG, kcal, p, c, f, na, hay: normQ([name, local, sub, chain, CATS[cat] || ""].join(" ")) }));
+const FD = (window.NU_FOODS || []).map(([name, local, cat, sub, chain, servDesc, servG, kcal, p, c, f, na, alc], i) =>
+  ({ i, name, local, cat, sub, chain, servDesc, servG, kcal, p, c, f, na, alc: alc || 0, hay: normQ([name, local, sub, chain, CATS[cat] || ""].join(" ")) }));
 function searchFoods(s){
   const nq = normQ(s), t = nq.split(" ").filter(Boolean); if (!t.length) return [];
   return FD.filter(x => t.every(w => x.hay.includes(w))).map(x => { const nn = normQ(x.name); return { x, s: (nn.startsWith(t[0]) ? 0 : 1) + (nn.includes(nq) ? 0 : 1) + x.name.length / 200 }; }).sort((a, b) => a.s - b.s).map(r => r.x);
@@ -626,12 +626,27 @@ q("#nuRes").onclick = ev => { const b = ev.target.closest("[data-fd]"); if (b) o
 function amountUI(prefix, quick){ return `<div class="nu-form" style="margin-top:4px"><label>Servings<input class="nu-field" id="${prefix}S" type="number" min="0" step="any" inputmode="decimal"></label><label id="${prefix}GL">Grams<input class="nu-field" id="${prefix}G" type="number" min="0" step="any" inputmode="decimal"></label></div>
   <div class="nu-chips" id="${prefix}Q" style="margin-top:8px">${quick}</div><div class="nu-calc"><span id="${prefix}M"></span><span><b id="${prefix}K">0</b> kcal</span></div><div class="small muted" id="${prefix}B"></div>`; }
 const per5 = (v, unit) => `<div class="nu-per"><div><b>${nf(v.kcal)}</b><span>kcal</span></div><div><b style="color:var(--protein)">${r1(v.p)}</b><span>protein</span></div><div><b style="color:var(--carbs)">${r1(v.c)}</b><span>carbs</span></div><div><b style="color:var(--fat)">${r1(v.f)}</b><span>fat</span></div><div><b>${v.na == null ? "–" : nf(v.na)}</b><span>Na mg</span></div></div>`;
+// personal cautions shown on every alcoholic drink (from the profile, lab reports and medicines)
+function alcoholFlags(){
+  const fl = window.HLP?.flags?.() || new Set(), meds = window.HLP?.meds?.() || [], out = [];
+  if (fl.has("pregnant") || fl.has("breastfeeding")) out.push("Pregnant or breastfeeding: no amount of alcohol is considered safe.");
+  if (fl.has("gout")) out.push("High uric acid / gout: alcohol, beer most of all, raises uric acid and can trigger an attack.");
+  if (fl.has("tg")) out.push("High triglycerides: alcohol and sugary mixers raise them.");
+  if (fl.has("liver") || fl.has("nafld")) out.push("Liver: raised liver enzymes or fatty liver; alcohol adds directly to liver strain.");
+  if (fl.has("t2d") || fl.has("t1d")) out.push("Diabetes: alcohol can cause low blood sugar hours later, especially with insulin or sulfonylureas; eat with it.");
+  if (fl.has("htn")) out.push("Blood pressure: regular drinking raises it.");
+  if (fl.has("single_kidney") || fl.has("ckd")) out.push("Kidney: alcohol dehydrates; drink water alongside and keep it occasional.");
+  if (meds.length) out.push(`You take ${meds.map(m => m.name).slice(0, 3).join(", ")}${meds.length > 3 ? "…" : ""}: check with your doctor or pharmacist whether alcohol interacts with them.`);
+  return out.length ? `<div class="notice" style="margin-top:8px">⚠ ${out.map(e2).join("<br>⚠ ")}</div>` : "";
+}
 function openFood(x){
   const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>${e2(x.name)}</h2>${closeBtn}</div>
-    <div class="small muted">${e2([x.local, x.chain || x.sub, CATS[x.cat]].filter(Boolean).join(" · "))} · 1 serving = ${e2(x.servDesc || "1 serving")}${x.servG ? ` (${r1(x.servG)} g)` : ""}</div>
-    ${per5(x)}${amountUI("fd", [.5, 1, 1.5, 2, 3].map(k => `<button class="pill-btn" data-k="${k}">${k === .5 ? "½" : k === 1.5 ? "1½" : k}×</button>`).join(""))}
+    <div class="small muted">${e2([x.local, x.chain || x.sub, CATS[x.cat]].filter(Boolean).join(" · "))} · 1 serving = ${e2(x.servDesc || "1 serving")}${x.servG && !/\d\s*ml\b/.test(x.servDesc || "") ? ` (${r1(x.servG)} ${x.cat === "alcohol" || x.cat === "beverages" ? "ml" : "g"})` : ""}</div>
+    ${per5(x)}${x.alc ? `<div class="small" style="margin-top:6px">🍺 <b>${r1(x.alc)} g alcohol</b> per serving = <b>${r1(x.alc / 10)}</b> standard drink${x.alc / 10 === 1 ? "" : "s"} (10 g each)${/peg/.test(x.servDesc || "") ? " · ½× = small peg (30 ml)" : ""}</div>${alcoholFlags()}` : ""}
+    ${amountUI("fd", [.5, 1, 1.5, 2, 3].map(k => `<button class="pill-btn" data-k="${k}">${k === .5 ? "½" : k === 1.5 ? "1½" : k}×</button>`).join(""))}
     <div class="row" style="justify-content:space-between"><span class="small muted">From the NutriScan food database</span><button class="btn primary" id="fdAdd">Add to ${MEALS.find(m => m.id === N.meal).name}</button></div>`);
   const S_ = bg.querySelector("#fdS"), G_ = bg.querySelector("#fdG"); S_.value = 1; G_.value = r1(x.servG); if (!x.servG) bg.querySelector("#fdGL").hidden = true;
+  if (x.cat === "alcohol" || x.cat === "beverages") bg.querySelector("#fdGL").firstChild.textContent = "ml";
   const calc = () => { const k = Math.max(0, +S_.value || 0), v = { kcal: r0(x.kcal * k), p: r1(x.p * k), c: r1(x.c * k), f: r1(x.f * k), na: r0(x.na * k) };
     bg.querySelector("#fdK").textContent = nf(v.kcal); bg.querySelector("#fdM").textContent = `P ${v.p} · C ${v.c} · F ${v.f} · Na ${nf(v.na)} mg`;
     bg.querySelectorAll("#fdQ [data-k]").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.k === k))); return { k, v }; };
@@ -640,7 +655,8 @@ function openFood(x){
   bg.querySelector("#fdQ").onclick = ev => { const b = ev.target.closest("[data-k]"); if (b) { S_.value = b.dataset.k; S_.oninput(); } };
   calc();
   bg.querySelector("#fdAdd").onclick = async ev => { const { k, v } = calc(); if (!k) return; ev.target.disabled = true;
-    try { await addEntries([{ name: x.chain ? `${x.name} · ${x.chain}` : x.name, serving: `${+k.toFixed(2)} × ${x.servDesc || "serving"}${x.servG ? ` (${r1(x.servG * k)} g)` : ""}`, ...v, src: "database" }]);
+    const unit = x.cat === "alcohol" || x.cat === "beverages" ? "ml" : "g";
+    try { await addEntries([{ name: x.chain ? `${x.name} · ${x.chain}` : x.name, serving: `${+k.toFixed(2)} × ${x.servDesc || "serving"}${x.servG ? ` (${r1(x.servG * k)} ${unit})` : ""}`, ...v, ...(x.alc ? { micros: [{ n: "Alcohol", amt: r1(x.alc * k), unit: "g" }] } : {}), src: "database" }]);
       toast(`Added ${x.name} · ${nf(v.kcal)} kcal`); bg.close(); q("#nuSearch").value = ""; renderRes(); } catch { ev.target.disabled = false; } };
 }
 
@@ -1085,6 +1101,7 @@ const MI = [
   { k: "satfat", n: "Saturated fat", u: "g", lim: 18, g: "Limits", re: /saturated/, why: "Raises LDL cholesterol.", src: "Ghee, butter, cream, cheese, coconut oil, fried and bakery foods.", note: "" },
   { k: "sugar", n: "Added sugar", u: "g", lim: 25, g: "Limits", re: /added sugar|^sugars?$/, why: "Raises triglycerides, liver fat and uric acid.", src: "Sweets, sugar in tea/coffee, juices, soft drinks, biscuits.", note: "Fructose (sugary drinks, juice) also raises uric acid." },
   { k: "chol", n: "Cholesterol", u: "mg", lim: 300, g: "Limits", re: /cholesterol/, why: "Dietary cholesterol matters less than saturated fat, but keep moderate.", src: "Egg yolk, ghee, butter, cheese." },
+  { k: "alcohol", n: "Alcohol", u: "g", lim: 20, g: "Limits", re: /^alcohol$|^ethanol$/, why: "1 standard drink = 10 g alcohol (≈ 30 ml spirit, 330 ml regular beer, 100 ml wine). Adds empty calories, disturbs sleep, and raises triglycerides, uric acid and blood pressure.", src: "Beer, wine, spirits, cocktails, breezers.", note: "There's no completely safe amount; fewer drinks and alcohol-free days are better." },
   { k: "caffeine", n: "Caffeine", u: "mg", lim: 400, g: "Limits", re: /caffeine/, why: "Up to 400 mg/day is fine for most adults; late caffeine hurts sleep.", src: "Coffee (~80–100 mg/cup), tea (~40 mg), energy drinks, pre-workouts." }
 ];
 const MIK = Object.fromEntries(MI.map(x => [x.k, x]));
@@ -1127,6 +1144,9 @@ function personaliseMI(){
   // thyroid, blood
   if (fl.has("hypo")) { add("i", "Hypothyroidism: iodised salt is enough; don't add iodine supplements unless your doctor says so."); add("ca", "If you take thyroxine, keep calcium and iron 4 hours away from it."); add("fe", "If you take thyroxine, keep iron 4 hours away from it."); }
   if (fl.has("hyper")) add("i", "Hyperthyroidism: avoid iodine supplements and kelp.");
+  if (fem) set("alcohol", { lim: 10 });
+  if (fl.has("gout") || fl.has("tg") || fl.has("liver") || fl.has("nafld")) { set("alcohol", { lim: 10 }); add("alcohol", "Kept low because of your " + [fl.has("gout") && "uric acid", fl.has("tg") && "triglycerides", (fl.has("liver") || fl.has("nafld")) && "liver"].filter(Boolean).join(", ") + "."); }
+  if (fl.has("pregnant") || fl.has("breastfeeding")) { set("alcohol", { lim: 0 }); add("alcohol", "Pregnancy / breastfeeding: avoid alcohol completely."); }
   if (fl.has("anaemia")) add("fe", "Low haemoglobin: pair iron foods with vitamin C (lemon, amla) and keep tea/coffee away from meals.");
   // lab-driven
   if (fl.has("hcy")) { set("b9", { t: Math.max(MIK.b9.t, 400) }); add("b9", "400 µg is used because your homocysteine was high; B12 and B6 help too."); }
@@ -1188,6 +1208,7 @@ function microTotals(days){
 }
 function microStatus(m, r){
   const v = r.tot[m.k] || 0;
+  if (m.lim === 0) return v > 0 ? ["out", "Avoid", 1] : ["ok", "None", 0];
   if (m.lim != null) { const f = v / m.lim; return f > 1 ? ["out", "Over limit", f] : f > .8 ? ["border", "Near limit", f] : ["ok", "Under limit", f]; }
   if (!m.t) { const top = m.cap || m.ul; if (m.ul && v > m.ul) return ["out", "Above safe limit", 1]; if (m.cap && v > m.cap) return ["border", "Above your kidney-aware limit", 1]; return ["ok", v ? "Tracked" : "None today", top ? v / top : v ? 1 : 0]; }
   const scoped = m.ulSupp ? (r.supp[m.k] || 0) : v;
@@ -1229,7 +1250,7 @@ function renderMicros(){
   if (fl.has("hypo") || fl.has("hyper")) rel.add("se");
   if (fl.has("pregnant") || fl.has("breastfeeding")) rel.add("choline");
   const inSupps = new Set(); for (const sp of Object.values(N.supps)) if (sp.active !== false) for (const x of suppNorm(sp).doseMicros || []) { const mk = MIK[x.n] || microKey(x.n); if (mk) inSupps.add(mk.k); }
-  const visible = m => showAll || rel.has(m.k) || (r.supp[m.k] || 0) > 0 || inSupps.has(m.k) || (m.extra && (r.tot[m.k] || 0) > 0);
+  const visible = m => (m.k === "alcohol" ? (r.tot.alcohol || 0) > 0 || showAll : showAll) || rel.has(m.k) || (r.supp[m.k] || 0) > 0 || inSupps.has(m.k) || (m.extra && (r.tot[m.k] || 0) > 0);
   const hidden = MI.filter(m => !visible(m)).length;
   const groups = ["Vitamins", "Minerals", "Other", "From supplements", "Limits"].filter(g => MI.some(m => m.g === g && visible(m)));
   const row = m => { const [st, lbl, f] = microStatus(m, r), v = r.tot[m.k] || 0, goal = m.lim ?? m.t;
