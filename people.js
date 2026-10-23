@@ -49,7 +49,7 @@ css.textContent = `
 .fa-slot.done{opacity:.6}
 .fa-st{font-size:.75rem;font-weight:700;border-radius:99px;padding:3px 9px;white-space:nowrap}
 .fa-st.taken{background:var(--ok-bg,#e7f6ec);color:var(--ok,#1a7f37)}.fa-st.skipped{background:var(--fill);color:var(--muted)}
-.fa-st.missed,.fa-st.overdue{background:var(--bad-bg,#fde8e8);color:var(--bad,#d70015)}.fa-st.due{background:var(--warn-bg,#fff4e0);color:var(--warn,#b25000)}
+.fa-st.overdue{background:var(--bad-bg,#fde8e8);color:var(--bad,#d70015)}.fa-st.due,.fa-st.missed{background:var(--warn-bg,#fff4e0);color:var(--warn,#b25000)}
 .fa-acts{display:flex;gap:6px;align-items:center}
 .fa-med{padding:12px 0;border-top:1px solid var(--line)}.fa-med:first-child{border-top:0}
 .fa-med .top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
@@ -296,23 +296,32 @@ function renderMeds(){
   const v = document.getElementById("v-meds"); if (!v || v.hidden) return;
   if (!S?.uid) { v.innerHTML = `<div class="card"><div class="empty">Sign in to see your medicines.</div></div>`; return; }
   if (F.missing) { v.innerHTML = `<div class="card"><div class="notice">Run <b>14-people-profiles-meds.sql</b> in Supabase first (see the setup steps), then tap refresh.</div></div>`; return; }
-  const today = ld(), meds = F.meds.filter(m => m.active !== false), slots = [];
-  for (const m of meds) for (const s of slotsOn(m, today)) slots.push({ m, s, st: slotState(m, today, s) });
+  const today = ld(), day = F.day && F.day < today ? F.day : today, isToday = day === today, minDay = addD(today, -59);
+  const meds = F.meds.filter(m => m.active !== false), slots = [];
+  for (const m of meds) for (const s of slotsOn(m, day)) slots.push({ m, s, st: slotState(m, day, s) });
   slots.sort((a, b) => a.s < b.s ? -1 : a.s > b.s ? 1 : 0);
-  const done = slots.filter(x => x.st === "taken").length, prn = meds.filter(m => m.freq === "asneeded");
+  const done = slots.filter(x => x.st === "taken").length, prn = meds.filter(m => m.freq === "asneeded" && (!m.start || day >= m.start));
+  const pending = slots.filter(x => x.st !== "taken" && x.st !== "skipped" && x.st !== "upcoming");
   const lows = F.meds.filter(m => m.active !== false).map(m => ({ m, k: stock(m) })).filter(x => x.k?.low);
   const a7 = meds.map(m => adherence(m, 7)).filter(Boolean), tot7 = a7.reduce((s, x) => s + x.due, 0), ok7 = a7.reduce((s, x) => s + x.took, 0);
   const slotRow = ({ m, s, st }) => `<div class="fa-slot ${st === "taken" || st === "skipped" ? "done" : ""}"><div class="t">${t12(s)}</div>
       <div><div class="n">${h(m.name)}${m.strength ? ` <span class="muted" style="font-weight:500">${h(m.strength)}</span>` : ""}</div><div class="d">${h(unitWord(m, m.qty || 1))}${m.food ? " · " + h(FOOD.find(f => f[0] === m.food)?.[1] || "") : ""}${m.condition ? " · for " + h(m.condition) : ""}</div></div>
       <div class="fa-acts">${st === "taken" || st === "skipped" ? `<span class="fa-st ${st}">${st === "taken" ? "✓ Taken" : "Skipped"}</span><button class="btn" data-undo="${m.id}|${s}" title="Undo">↺</button>`
-        : `${st === "overdue" || st === "due" ? `<span class="fa-st ${st}">${st === "overdue" ? "Overdue" : "Due"}</span>` : ""}<button class="btn" data-skip="${m.id}|${s}">Skip</button><button class="btn primary" data-take="${m.id}|${s}">Take</button>`}</div></div>`;
+        : `${st === "overdue" || st === "due" || st === "missed" ? `<span class="fa-st ${st}">${st === "overdue" ? "Overdue" : st === "missed" ? "Not marked" : "Due"}</span>` : ""}<button class="btn" data-skip="${m.id}|${s}">Skip</button><button class="btn primary" data-take="${m.id}|${s}">Take</button>`}</div></div>`;
   v.innerHTML = `
-    <div class="card"><div class="card-h"><h2>Today</h2><span class="hint">${new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" })}</span></div>
-      ${slots.length || prn.length ? `<div class="fa-row" style="gap:24px;margin-bottom:8px"><div><div class="fa-big">${done}<span class="muted" style="font-size:1rem"> / ${slots.length}</span></div><div class="small muted">doses taken today</div></div>
-        ${tot7 ? `<div><div class="fa-big">${Math.round(ok7 / tot7 * 100)}%</div><div class="small muted">taken on time, last 7 days</div></div>` : ""}</div>
+    <div class="card"><div class="card-h" style="flex-wrap:wrap;gap:8px"><div class="fa-row" style="gap:6px;flex-wrap:nowrap">
+        <button class="btn" data-dnav="-1" aria-label="Previous day" ${day <= minDay ? "disabled" : ""}>‹</button>
+        <h2 style="margin:0 4px">${isToday ? "Today" : addD(today, -1) === day ? "Yesterday" : new Date(day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}</h2>
+        <button class="btn" data-dnav="1" aria-label="Next day" ${isToday ? "disabled" : ""}>›</button></div>
+        <label class="small muted" style="display:flex;align-items:center;gap:6px">Date <input type="date" id="faDay" value="${day}" min="${minDay}" max="${today}" style="font:inherit;padding:5px 8px;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink)"></label></div>
+      ${!isToday ? `<div class="notice" style="margin-bottom:8px">Marking doses for <b>${new Date(day + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</b>. <a href="#" id="faToday">Back to today</a></div>` : ""}
+      ${slots.length || prn.length ? `<div class="fa-row" style="gap:24px;margin-bottom:8px"><div><div class="fa-big">${done}<span class="muted" style="font-size:1rem"> / ${slots.length}</span></div><div class="small muted">doses taken ${isToday ? "today" : "this day"}</div></div>
+        ${tot7 ? `<div><div class="fa-big">${Math.round(ok7 / tot7 * 100)}%</div><div class="small muted">of doses taken, last 7 days</div></div>` : ""}</div>
         ${lows.length ? `<div class="notice" style="margin:8px 0">${lows.map(({ m, k }) => `<b>${h(m.name)}</b>: ${k.left <= 0 ? "pack finished" : `${h(unitWord(m, k.left))} left (~${k.days} day${k.days === 1 ? "" : "s"})`}`).join(" · ")}. Time to restock.</div>` : ""}
         <div>${slots.map(slotRow).join("")}</div>
-        ${prn.length ? `<div class="fa-sec" style="margin-top:12px">As needed</div>${prn.map(m => { const n = F.log.filter(x => x.med_id === m.id && x.day === today && x.status === "taken").length; return `<div class="fa-slot"><div class="t">—</div><div><div class="n">${h(m.name)} ${h(m.strength || "")}</div><div class="d">${n ? `Taken ${n}× today` : "Not taken today"}${m.condition ? " · for " + h(m.condition) : ""}</div></div><div class="fa-acts"><button class="btn primary" data-prn="${m.id}">Took a dose</button></div></div>`; }).join("")}` : ""}`
+        ${pending.length > 1 ? `<div class="fa-row" style="justify-content:flex-end;margin-top:8px"><button class="btn" id="faAllTaken">Mark all ${pending.length} as taken</button></div>` : ""}
+        ${!slots.length && !prn.length ? `<div class="empty">No doses scheduled for this day.</div>` : ""}
+        ${prn.length ? `<div class="fa-sec" style="margin-top:12px">As needed</div>${prn.map(m => { const n = F.log.filter(x => x.med_id === m.id && x.day === day && x.status === "taken").length; return `<div class="fa-slot"><div class="t">—</div><div><div class="n">${h(m.name)} ${h(m.strength || "")}</div><div class="d">${n ? `Taken ${n}× ${isToday ? "today" : "this day"}` : `Not taken ${isToday ? "today" : "this day"}`}${m.condition ? " · for " + h(m.condition) : ""}</div></div><div class="fa-acts">${n ? `<button class="btn" data-prnundo="${m.id}" title="Remove one">−</button>` : ""}<button class="btn primary" data-prn="${m.id}">Took a dose</button></div></div>`; }).join("")}` : ""}`
         : `<div class="empty">No medicines yet. Add the ones you take and they appear here as a daily checklist with reminders of what's due.</div>`}
     </div>
     <div class="card"><div class="card-h"><h2>My medicines</h2><button class="btn primary" id="faAddMed">+ Add medicine</button></div>
@@ -326,24 +335,30 @@ function renderMeds(){
           <div class="fa-acts">${k ? `<button class="btn" data-restock="${m.id}">Restock</button>` : ""}<button class="btn" data-editmed="${m.id}">Edit</button></div></div></div>`; }).join("") : `<div class="empty">Nothing added yet.</div>`}</div>
       <p class="small muted" style="margin-top:10px">For tracking only. Always follow your doctor's prescription; don't change or stop a medicine without asking them.</p></div>`;
   v.querySelector("#faAddMed").onclick = () => openMed();
+  const setDay = d => { F.day = d && d < today ? (d < minDay ? minDay : d) : null; renderMeds(); };
+  v.querySelector("#faDay").onchange = e => setDay(e.target.value);
+  v.querySelector("#faToday")?.addEventListener("click", e => { e.preventDefault(); setDay(null); });
+  v.querySelector("#faAllTaken")?.addEventListener("click", async e => { e.target.disabled = true; for (const x of pending) { const l = logFor(x.m.id, day, x.s); if (l) await unlog(l.id, true); await logDose(x.m.id, x.s, "taken", day, true); } renderMeds(); toast(`${pending.length} doses marked as taken`); });
   v.onclick = async ev => {
     const b = ev.target.closest("button"); if (!b) return;
+    if (b.dataset.dnav) return setDay(addD(day, +b.dataset.dnav));
     if (b.dataset.editmed) return openMed(F.meds.find(m => m.id === b.dataset.editmed));
     if (b.dataset.restock) return openRestock(F.meds.find(m => m.id === b.dataset.restock));
     const [id, slot] = String(b.dataset.take || b.dataset.skip || b.dataset.undo || "").split("|");
-    if (b.dataset.take || b.dataset.skip) { b.disabled = true; await logDose(id, slot, b.dataset.take ? "taken" : "skipped"); }
-    if (b.dataset.undo) { const l = logFor(id, today, slot); if (l) await unlog(l.id); }
-    if (b.dataset.prn) { b.disabled = true; await logDose(b.dataset.prn, "prn-" + Date.now().toString(36), "taken"); }
+    if (b.dataset.take || b.dataset.skip) { b.disabled = true; await logDose(id, slot, b.dataset.take ? "taken" : "skipped", day); }
+    if (b.dataset.undo) { const l = logFor(id, day, slot); if (l) await unlog(l.id); }
+    if (b.dataset.prn) { b.disabled = true; await logDose(b.dataset.prn, "prn-" + Date.now().toString(36), "taken", day); }
+    if (b.dataset.prnundo) { const l = F.log.filter(x => x.med_id === b.dataset.prnundo && x.day === day && x.status === "taken").pop(); if (l) await unlog(l.id); }
   };
 }
-async function logDose(id, slot, status){
-  const m = F.meds.find(x => x.id === id), row = { id: nid("l"), user_id: S.uid, med_id: id, day: ld(), slot, status, qty: +m?.qty || 1 };
+async function logDose(id, slot, status, day, quiet){
+  const m = F.meds.find(x => x.id === id), row = { id: nid("l"), user_id: S.uid, med_id: id, day: day || ld(), slot, status, qty: +m?.qty || 1 };
   const { error } = await sb().from("med_log").insert(row);
   if (error) { toast("Couldn't save: " + error.message); renderMeds(); return; }
-  F.log.push({ ...row, at: new Date().toISOString() }); renderMeds();
+  F.log.push({ ...row, at: new Date().toISOString() }); if (quiet) return; renderMeds();
   if (status === "taken") { const k = stock(m); if (k?.low) toast(`${m.name}: ${k.left <= 0 ? "pack finished" : `about ${k.days} days left`}, time to restock`); }
 }
-async function unlog(lid){ const { error } = await sb().from("med_log").delete().eq("id", lid); if (error) { toast(error.message); return; } F.log = F.log.filter(x => x.id !== lid); renderMeds(); }
+async function unlog(lid, quiet){ const { error } = await sb().from("med_log").delete().eq("id", lid); if (error) { toast(error.message); return; } F.log = F.log.filter(x => x.id !== lid); if (!quiet) renderMeds(); }
 async function saveMed(m){
   const { id, active, ...doc } = m;
   const { error } = await sb().from("medications").upsert({ id, user_id: S.uid, doc, active: active !== false, updated_at: new Date().toISOString() });
