@@ -303,7 +303,7 @@ NU.load = async function(){
     N.products = {}; for (const x of pr.data) N.products[x.code] = { ...x.doc, code: x.code, usedAt: x.used_at };
     N.supps = {}; for (const x of sp.data) N.supps[x.id] = { ...x.doc, id: x.id, active: x.active };
     N.plan = { ...DEFAULT_PLAN, ...(pl.data?.plan || (planFromProfile() || {})) }; N.planSaved = !!pl.data;
-    N.loaded = true; showNotice("");
+    N.loaded = true; showNotice(""); backfillMyFoods().catch(() => {});
   } catch (err) {
     const m = String(err?.message || err?.code || err);
     showNotice(/relation .* does not exist|food_entries|schema cache/i.test(m)
@@ -311,7 +311,7 @@ NU.load = async function(){
       : "Couldn't load your nutrition data: " + e2(m));
   } finally { N.loading = false; NU.render(); }
 };
-NU.reset = function(){ N.entries = []; N.water = []; N.products = {}; N.supps = {}; N.plan = { ...DEFAULT_PLAN }; N.loaded = false; N.loadedFrom = null; NU.render(); };
+NU.reset = function(){ N.myBackfilled = false; N.entries = []; N.water = []; N.products = {}; N.supps = {}; N.plan = { ...DEFAULT_PLAN }; N.loaded = false; N.loadedFrom = null; NU.render(); };
 async function ensureLoaded(d){
   if (!signedIn() || !N.loadedFrom || d >= N.loadedFrom) return;
   const from = addDays(d, -30), to = addDays(N.loadedFrom, -1);
@@ -331,6 +331,7 @@ async function addEntries(list){
   const { error } = await sb().from("food_entries").insert(rows);
   if (error) { toast("Couldn't save: " + error.message); throw error; }
   N.entries.push(...rows.map(rowToEntry)); NU.render();
+  rememberFoods(list.map((x, i) => ({ ...x, micros: rows[i].micros || x.micros }))).catch(() => {});
   const fresh = N.entries.filter(e => rows.some(r => r.id === e.id) && e.meal !== "supplements" && !(e.micros || []).length);
   if (fresh.length && window.hasAI?.()) setTimeout(() => estimateMicros(fresh, false), 50);
   return rows.map(rowToEntry);
@@ -607,9 +608,46 @@ function setSt(el, html, bad){ el.className = "nu-status" + (bad ? " err" : "");
 const CATS = window.NU_FOOD_CATS || {};
 const FD = (window.NU_FOODS || []).map(([name, local, cat, sub, chain, servDesc, servG, kcal, p, c, f, na, alc], i) =>
   ({ i, name, local, cat, sub, chain, servDesc, servG, kcal, p, c, f, na, alc: alc || 0, hay: normQ([name, local, sub, chain, CATS[cat] || ""].join(" ")) }));
+/* ---------- My foods: anything you log by estimate, photo, label or manual entry is remembered for one-tap search ---------- */
+const MYF = "my:";
+const myCode = n => MYF + normQ(n).replace(/\s+/g, "-").slice(0, 80);
+const myFoods = () => Object.values(N.products).filter(p => String(p.code || "").startsWith(MYF));
+async function rememberFoods(list){
+  for (const x of list) {
+    if (!x || x.meal === "supplements" || x.barcode || ["database", "supplement", "mine"].includes(x.src)) continue;
+    const code = myCode(x.name || ""); if (code === MYF || !(+x.kcal >= 0)) continue;
+    const prev = N.products[code];
+    await saveProduct({ code, name: String(x.name).trim().slice(0, 120), servDesc: x.serving || "1 serving", kcal: r0(x.kcal), p: r1(x.p), c: r1(x.c), f: r1(x.f), na: x.na == null ? null : r0(x.na),
+      micros: (x.micros || []).length ? x.micros : prev?.micros || [], mine: 1, uses: (prev?.uses || 0) + 1, from: x.src || "manual", usedAt: new Date().toISOString() });
+  }
+}
+// one-time fill from your existing diary: every food you've estimated or entered before becomes searchable
+async function backfillMyFoods(){
+  if (N.myBackfilled || !N.loaded) return; N.myBackfilled = true;
+  const latest = {};
+  for (const e of N.entries) {
+    if (e.meal === "supplements" || e.barcode || ["database", "supplement", "mine"].includes(e.src)) continue;
+    const code = myCode(e.name || ""); if (code === MYF || N.products[code]) continue;
+    const cur = latest[code];
+    if (!cur) latest[code] = { e, n: 1 }; else { cur.n++; if ((e.at || e.date) > (cur.e.at || cur.e.date)) cur.e = e; }
+  }
+  const rows = Object.entries(latest).map(([code, { e, n }]) => {
+    const doc = { name: String(e.name).trim().slice(0, 120), servDesc: e.serving || "1 serving", kcal: r0(e.kcal), p: r1(e.p), c: r1(e.c), f: r1(e.f), na: e.na == null ? null : r0(e.na), micros: e.micros || [], mine: 1, uses: n, from: e.src || "manual" };
+    N.products[code] = { ...doc, code, usedAt: e.at || null };
+    return { user_id: S.uid, code, doc, used_at: e.at || null, updated_at: new Date().toISOString() };
+  });
+  for (let i = 0; i < rows.length; i += 200) { const { error } = await sb().from("food_products").upsert(rows.slice(i, i + 200), { onConflict: "user_id,code" }); if (error) { console.warn("My foods backfill:", error.message); break; } }
+}
+async function forgetFood(code){
+  const { error } = await sb().from("food_products").delete().eq("code", code);
+  if (error) { toast("Couldn't remove: " + error.message); return; }
+  delete N.products[code]; renderRes();
+}
+const myAsFD = p => ({ i: p.code, mine: 1, code: p.code, name: p.name, local: "", cat: "mine", sub: "My food", chain: "", servDesc: p.servDesc || "1 serving", servG: null,
+  kcal: +p.kcal || 0, p: +p.p || 0, c: +p.c || 0, f: +p.f || 0, na: p.na == null ? 0 : +p.na, alc: (p.micros || []).find(m => /^alcohol$/i.test(m.n))?.amt || 0, micros: p.micros || [], uses: p.uses || 1, hay: normQ(p.name + " my food") });
 function searchFoods(s){
   const nq = normQ(s), t = nq.split(" ").filter(Boolean); if (!t.length) return [];
-  return FD.filter(x => t.every(w => x.hay.includes(w))).map(x => { const nn = normQ(x.name); return { x, s: (nn.startsWith(t[0]) ? 0 : 1) + (nn.includes(nq) ? 0 : 1) + x.name.length / 200 }; }).sort((a, b) => a.s - b.s).map(r => r.x);
+  return myFoods().map(myAsFD).concat(FD).filter(x => t.every(w => x.hay.includes(w))).map(x => { const nn = normQ(x.name); return { x, s: (nn.startsWith(t[0]) ? 0 : 1) + (nn.includes(nq) ? 0 : 1) + x.name.length / 200 - (x.mine ? 1.5 : 0) }; }).sort((a, b) => a.s - b.s).map(r => r.x);
 }
 let sT; q("#nuSearch").oninput = () => { clearTimeout(sT); sT = setTimeout(renderRes, 120); };
 // browsers sometimes autofill the login email into this box; clear that
@@ -618,11 +656,11 @@ function renderRes(){
   const v = q("#nuSearch").value, box = q("#nuRes"), res = searchFoods(v);
   if (!v.trim()) { box.hidden = true; box.innerHTML = ""; return; }
   box.hidden = false;
-  box.innerHTML = res.length ? res.slice(0, 8).map(x => `<button type="button" data-fd="${x.i}"><span class="n">${e2(x.name)}${x.local && x.local !== x.name ? ` <span class="s">${e2(x.local)}</span>` : ""}</span>
+  box.innerHTML = res.length ? res.slice(0, 8).map(x => `<button type="button" data-fd="${x.i}"><span class="n">${x.mine ? "★ " : ""}${e2(x.name)}${x.local && x.local !== x.name ? ` <span class="s">${e2(x.local)}</span>` : ""}</span>
     <span class="s">${e2([x.chain || x.sub, x.servDesc].filter(Boolean).join(" · "))}</span><span class="k">${nf(x.kcal)} kcal</span></button>`).join("") + (res.length > 8 ? `<div class="more">${res.length - 8} more. Keep typing to narrow down.</div>` : "")
     : `<div class="more">Not in the database. Describe it below and Claude will estimate it, or use Packaged food for a label.</div>`;
 }
-q("#nuRes").onclick = ev => { const b = ev.target.closest("[data-fd]"); if (b) openFood(FD[+b.dataset.fd]); };
+q("#nuRes").onclick = ev => { const b = ev.target.closest("[data-fd]"); if (!b) return; const id = b.dataset.fd; openFood(id.startsWith(MYF) ? myAsFD(N.products[id]) : FD[+id]); };
 function amountUI(prefix, quick){ return `<div class="nu-form" style="margin-top:4px"><label>Servings<input class="nu-field" id="${prefix}S" type="number" min="0" step="any" inputmode="decimal"></label><label id="${prefix}GL">Grams<input class="nu-field" id="${prefix}G" type="number" min="0" step="any" inputmode="decimal"></label></div>
   <div class="nu-chips" id="${prefix}Q" style="margin-top:8px">${quick}</div><div class="nu-calc"><span id="${prefix}M"></span><span><b id="${prefix}K">0</b> kcal</span></div><div class="small muted" id="${prefix}B"></div>`; }
 const per5 = (v, unit) => `<div class="nu-per"><div><b>${nf(v.kcal)}</b><span>kcal</span></div><div><b style="color:var(--protein)">${r1(v.p)}</b><span>protein</span></div><div><b style="color:var(--carbs)">${r1(v.c)}</b><span>carbs</span></div><div><b style="color:var(--fat)">${r1(v.f)}</b><span>fat</span></div><div><b>${v.na == null ? "–" : nf(v.na)}</b><span>Na mg</span></div></div>`;
@@ -644,7 +682,8 @@ function openFood(x){
     <div class="small muted">${e2([x.local, x.chain || x.sub, CATS[x.cat]].filter(Boolean).join(" · "))} · 1 serving = ${e2(x.servDesc || "1 serving")}${x.servG && !/\d\s*ml\b/.test(x.servDesc || "") ? ` (${r1(x.servG)} ${x.cat === "alcohol" || x.cat === "beverages" ? "ml" : "g"})` : ""}</div>
     ${per5(x)}${x.alc ? `<div class="small" style="margin-top:6px">🍺 <b>${r1(x.alc)} g alcohol</b> per serving = <b>${r1(x.alc / 10)}</b> standard drink${x.alc / 10 === 1 ? "" : "s"} (10 g each)${/peg/.test(x.servDesc || "") ? " · ½× = small peg (30 ml)" : ""}</div>${alcoholFlags()}` : ""}
     ${amountUI("fd", [.5, 1, 1.5, 2, 3].map(k => `<button class="pill-btn" data-k="${k}">${k === .5 ? "½" : k === 1.5 ? "1½" : k}×</button>`).join(""))}
-    <div class="row" style="justify-content:space-between"><span class="small muted">From the NutriScan food database</span><button class="btn primary" id="fdAdd">Add to ${MEALS.find(m => m.id === N.meal).name}</button></div>`);
+    <div class="row" style="justify-content:space-between">${x.mine ? `<span class="small muted">★ My food · saved from your ${x.uses > 1 ? x.uses + " logs" : "log"} · <a href="#" id="fdForget">remove</a></span>` : `<span class="small muted">From the NutriScan food database</span>`}<button class="btn primary" id="fdAdd">Add to ${MEALS.find(m => m.id === N.meal).name}</button></div>`);
+  bg.querySelector("#fdForget")?.addEventListener("click", async e => { e.preventDefault(); await forgetFood(x.code); toast(`Removed ${x.name} from My foods`); bg.close(); });
   const S_ = bg.querySelector("#fdS"), G_ = bg.querySelector("#fdG"); S_.value = 1; G_.value = r1(x.servG); if (!x.servG) bg.querySelector("#fdGL").hidden = true;
   if (x.cat === "alcohol" || x.cat === "beverages") bg.querySelector("#fdGL").firstChild.textContent = "ml";
   const calc = () => { const k = Math.max(0, +S_.value || 0), v = { kcal: r0(x.kcal * k), p: r1(x.p * k), c: r1(x.c * k), f: r1(x.f * k), na: r0(x.na * k) };
@@ -656,7 +695,8 @@ function openFood(x){
   calc();
   bg.querySelector("#fdAdd").onclick = async ev => { const { k, v } = calc(); if (!k) return; ev.target.disabled = true;
     const unit = x.cat === "alcohol" || x.cat === "beverages" ? "ml" : "g";
-    try { await addEntries([{ name: x.chain ? `${x.name} · ${x.chain}` : x.name, serving: `${+k.toFixed(2)} × ${x.servDesc || "serving"}${x.servG ? ` (${r1(x.servG * k)} ${unit})` : ""}`, ...v, ...(x.alc ? { micros: [{ n: "Alcohol", amt: r1(x.alc * k), unit: "g" }] } : {}), src: "database" }]);
+    try { await addEntries([{ name: x.chain ? `${x.name} · ${x.chain}` : x.name, serving: `${+k.toFixed(2)} × ${x.servDesc || "serving"}${x.servG ? ` (${r1(x.servG * k)} ${unit})` : ""}`, ...v, ...(x.mine ? { micros: (x.micros || []).map(m => ({ ...m, amt: Math.round(m.amt * k * 1000) / 1000 })) } : x.alc ? { micros: [{ n: "Alcohol", amt: r1(x.alc * k), unit: "g" }] } : {}), src: x.mine ? "mine" : "database" }]);
+      if (x.mine) { const pr = N.products[x.code]; if (pr) saveProduct({ ...pr, uses: (pr.uses || 1) + 1, usedAt: new Date().toISOString() }).catch(() => {}); }
       toast(`Added ${x.name} · ${nf(v.kcal)} kcal`); bg.close(); q("#nuSearch").value = ""; renderRes(); } catch { ev.target.disabled = false; } };
 }
 
@@ -793,7 +833,7 @@ function openPack(){
       else { const ZX = await loadZX(); scan.reader = zxReader(ZX); scan.reader.decodeFromVideoElementContinuously(video, res => { if (res && scan?.stream) gotCode(repairCode(res.getText())); }); }
     } catch { stopCam(); st("Couldn't open the live camera. Allow camera access for this site in Safari, or use “Photo of barcode”.", true); }
   };
-  const list = Object.values(N.products).sort((a, b) => String(b.usedAt || "").localeCompare(String(a.usedAt || ""))).slice(0, 10);
+  const list = Object.values(N.products).filter(p => !String(p.code || "").startsWith(MYF)).sort((a, b) => String(b.usedAt || "").localeCompare(String(a.usedAt || ""))).slice(0, 10);
   bg.querySelector("#pkRecent").innerHTML = list.length ? `<div class="nu-sec">Your products</div><div class="nu-chips">${list.map(p => `<button class="pill-btn" data-code="${e2(p.code)}">${e2(p.name)}</button>`).join("")}</div>` : "";
   bg.querySelector("#pkRecent").onclick = ev => { const b = ev.target.closest("[data-code]"); if (b) { scan.code = null; showProduct(N.products[b.dataset.code]); } };
 }
@@ -1292,6 +1332,7 @@ Reply with ONLY JSON: {"items":{"i0":{"vitA":0,"vitD":0}}}`, null, 900 * chunk.l
         const e = chunk[j]; const { error } = await sb().from("food_entries").update({ micros }).eq("id", e.id);
         if (error) throw error;
         const loc = N.entries.find(x => x.id === e.id); if (loc) loc.micros = micros; done++;
+        const mf = N.products[myCode(e.name)]; if (mf && Math.abs((+mf.kcal || 0) - (+e.kcal || 0)) <= Math.max(5, (+mf.kcal || 0) * .02) && !(mf.micros || []).length) saveProduct({ ...mf, micros }).catch(() => {});
       }
       renderMicros();
     }
