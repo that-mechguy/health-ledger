@@ -74,6 +74,9 @@ css.textContent = `
 .nu-ring .of{font-family:var(--f-mono);font-size:.72rem;color:var(--muted);margin-top:4px;text-transform:uppercase}
 .nu-ring .band{font-weight:700;font-size:.86rem;margin-top:3px}
 .nu-tile .bar i{transition:width .6s}
+#nuMacros{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:760px){#nuMacros{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:420px){#nuMacros{grid-template-columns:1fr}}
 .nu-tile .k{display:flex;justify-content:space-between;align-items:center;gap:6px}
 .nu-tile .v small{font-family:var(--f-mono);font-size:.72rem;color:var(--muted);font-weight:400}
 .nu-chips{display:flex;gap:6px;flex-wrap:wrap}
@@ -477,7 +480,14 @@ NU.render = function(){
     return `<div class="sub-s nu-tile"><div class="k"><span><i class="nu-dot" style="background:${c}"></i> ${n}</span>${st ? chipH(st[0], st[1]) : ""}</div>
       <div class="v">${r0(v)}<small> / ${tg} g</small></div><div class="bar"><i style="width:${Math.min(100, frac * 100)}%;background:${c}"></i></div>
       <div class="w">${v <= tg ? `${r0(tg - v)} g left` : `${r0(v - tg)} g over`}</div></div>`;
-  }).join("");
+  }).join("") + (() => {   // fibre: a minimum to reach (more is fine), from food estimates + supplements
+    personaliseMI(); const fm = MIK.fibre, tg = Math.round(fm?.t || 30), v = microTotals([d]).tot.fibre || 0, frac = tg ? v / tg : 0;
+    const pending = dayItems(d).filter(e => e.meal !== "supplements" && !(e.micros || []).length).length;
+    return `<div class="sub-s nu-tile" data-mi="fibre" role="button" tabindex="0" style="cursor:pointer"><div class="k"><span><i class="nu-dot" style="background:#AF52DE"></i> Fibre</span>${frac >= 1 ? chipH("ok", "Goal met") : ""}</div>
+      <div class="v">${r0(v)}<small> / ${tg} g</small></div><div class="bar"><i style="width:${Math.min(100, frac * 100)}%;background:#AF52DE"></i></div>
+      <div class="w">${pending ? `${pending} item${pending > 1 ? "s" : ""} not estimated yet` : v >= tg ? `${r0(v - tg)} g above goal` : `${r0(tg - v)} g to go`}</div></div>`;
+  })();
+  q("#nuMacros").querySelector("[data-mi=fibre]")?.addEventListener("click", () => openMicro("fibre"));
   const a = act(d), lw = latestWeight();
   q("#nuMeta").innerHTML = [`Sodium <b class="num">${nf(t.na)}</b> / ${nf(P.sodiumMg)} mg`, `Water <b class="num">${(waterOn(d) / 1000).toFixed(2)}</b> / ${(+P.waterL).toFixed(1)} L`,
     a && a.k ? `Burned (Apple Health) <b class="num">${nf(a.k)}</b> active kcal` : "", a && a.s ? `<b class="num">${nf(a.s)}</b> steps` : "",
