@@ -107,6 +107,14 @@ a.btn{text-decoration:none}
 .subs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 @media (max-width:420px){.subs{grid-template-columns:1fr}}
 .sub-s{background:var(--surface-2);border-radius:10px;padding:10px 12px;text-align:left}
+.hk{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.hk .t{background:var(--surface-2);border-radius:14px;padding:12px 14px;text-align:left;border:0;color:var(--ink);font:inherit;display:flex;flex-direction:column;gap:4px;cursor:pointer;min-width:0}
+.hk .t[disabled]{cursor:default;opacity:.7}
+.hk .t .n{font-weight:700;font-size:.92rem}.hk .t .v{font-family:var(--f-display);font-size:1.6rem;font-weight:700;line-height:1.1}
+.hk .t .v small{font-size:.75rem;color:var(--muted);font-weight:500;font-family:inherit}
+.hk .t .g{font-size:.78rem;color:var(--muted)}
+@media (max-width:980px){.hk{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:640px){.hk{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .sub-s .k{font-size:.76rem;color:var(--muted);font-weight:600}
 .sub-s .v{font-family:var(--f-display);font-size:1.6rem;font-weight:700}
 .sub-s .w{font-size:.72rem;color:var(--muted)}
@@ -472,6 +480,10 @@ header.top.compact .refresh{width:30px;height:30px}
           <div class="hero-meta" id="heroMeta"></div>
         </div>
       </div>
+    </div>
+    <div class="card" id="heartCard">
+      <div class="card-h"><h2>Heart risk markers</h2><span class="hint">Your targets · tap one for its full history</span></div>
+      <div class="hk" id="heartTiles"></div>
     </div>
     <div class="card">
       <div class="card-h"><h2>Score by body system</h2><span class="hint">Latest value of each marker · tap a system to see its results</span></div>
@@ -1001,7 +1013,21 @@ function barChart(el, list, opts={}){
 }
 
 /* ---------- render: overview ---------- */
+function renderHeartTiles(){
+  const box = $("#heartTiles"); if (!box) return;
+  box.innerHTML = HEART.map(h => {
+    const k = heartKey(h);
+    if (!k) return `<button class="t" disabled><span class="n">${esc(h.n)}</span><span class="v" style="color:var(--muted)">—</span><span class="g">Target ${esc(heartTarget(h, h.du).label)}</span><span class="small muted">Not in your reports yet · ask for it at your next blood test</span></button>`;
+    const s = D.series[k], e = s[s.length - 1], p = e.p, st = heartStatus(h, p), t = heartTarget(h, p.unit);
+    const pv = s.length > 1 ? numVal(s[s.length - 2].p.value) : null, cv = numVal(p.value), tr = pv != null && cv != null ? { dir: cv < pv * .98 ? "better" : cv > pv * 1.02 ? "worse" : "flat" } : null;
+    return `<button class="t" data-hk="${esc(k)}" title="${esc(h.why)}"><span class="n">${esc(h.n)}</span><span class="v">${fmtN(numVal(p.value) ?? p.value)} <small>${esc(p.unit || h.du)}</small></span>
+      <span>${chip(st, HEART_ST[st])}</span><span class="g">Target ${esc(t.label)}</span>
+      <span class="row" style="gap:8px;align-items:center">${spark(k)}<span class="small muted">${fmtShort(e.date)} · ${s.length} test${s.length > 1 ? "s" : ""}${tr ? ` · ${tr.dir === "better" ? "improving" : tr.dir === "worse" ? "worsening" : "steady"}` : ""}</span></span></button>`;
+  }).join("");
+  box.querySelectorAll("[data-hk]").forEach(b => b.onclick = () => { S.histCat = "lipids"; S.histKey = b.dataset.hk; go("history"); });
+}
 function renderOverview(){
+  renderHeartTiles();
   $("#ring").innerHTML = ringSVG(D.overall);
   const [lbl] = D.overall == null ? ["—"] : band(D.overall);
   $("#heroHead").textContent = D.overall == null ? "Your records will appear here" :
@@ -1078,32 +1104,56 @@ function renderResults(){
 }
 
 /* ---------- render: history ---------- */
+/* ---------- heart-risk markers: primary in Heart & lipids, with personal targets ---------- */
+// t(unit) → target in the report's own unit; okBelow = "in target" when value < target; border up to `b` × target
+const HEART = [
+  { k: "hba1c", alt: [], n: "HbA1c", why: "3-month average blood sugar", t: u => /mmol/i.test(u) ? 38 : 5.6, b: 6.5 / 5.6, du: "%" },
+  { k: "apob", alt: ["apo_b", "apolipoprotein_b"], n: "ApoB", why: "count of artery-clogging particles", t: u => /g\/l/i.test(u) && !/mg/i.test(u) ? 0.8 : 80, b: 1.25, du: "mg/dL" },
+  { k: "hscrp", alt: ["crp"], n: "hs-CRP", why: "inflammation in the blood vessels", t: u => /mg\/dl/i.test(u) ? 0.1 : 1, b: 3, du: "mg/L" },
+  { k: "homocys", alt: ["homocysteine"], n: "Homocysteine", why: "damages vessel walls; lowered by B12, folate, B6", t: u => /mg\/l/i.test(u) ? 1.35 : 10, b: 1.5, du: "µmol/L" },
+  { k: "lpa", alt: ["lp_a", "lipoprotein_a"], n: "Lipoprotein(a)", why: "inherited sticky cholesterol particle", t: u => /nmol/i.test(u) ? 75 : 30, b: 50 / 30, du: "mg/dL" }
+];
+const heartKey = h => [h.k, ...h.alt].find(k => D.series[k]?.length) || null;
+const heartOf = k => HEART.find(h => h.k === k || h.alt.includes(k));
+function heartTarget(h, unit){ const v = h.t(unit || ""); return { v, label: `< ${fmtN(v)} ${unit || h.du}` }; }
+function heartStatus(h, p){ const v = numVal(p.value); if (v == null) return "info"; const t = h.t(p.unit || ""); return v < t ? "ok" : v < t * h.b ? "border" : "out"; }
+const HEART_ST = { ok: "On target", border: "Above target", out: "Well above target", info: "No value" };
+
 function renderHistory(){
   const cats = Object.keys(CATS).filter(c => D.cat[c]);
   if (!cats.includes(S.histCat)) S.histCat = cats[0] || "lipids";
   $("#histCats").innerHTML = cats.map(c => `<button class="pill-btn" data-c="${c}" aria-pressed="${c === S.histCat}">${esc(CATS[c].name)}</button>`).join("");
   $("#histCats").querySelectorAll("button").forEach(b => b.onclick = () => { S.histCat = b.dataset.c; S.histKey = null; renderHistory(); });
-  const ord = CATALOG.map(x => x[0]);
-  const keys = Object.keys(D.series).filter(k => (CATS[D.latest[k].p.cat] ? D.latest[k].p.cat : "other") === S.histCat)
-    .sort((a,b) => (ord.indexOf(a) < 0 ? 999 : ord.indexOf(a)) - (ord.indexOf(b) < 0 ? 999 : ord.indexOf(b)));
+  const ord = CATALOG.map(x => x[0]), isHeart = S.histCat === "lipids";
+  const prim = isHeart ? HEART.map(heartKey).filter(Boolean) : [];
+  const missing = isHeart ? HEART.filter(h => !heartKey(h)) : [];
+  const keys = prim.concat(Object.keys(D.series).filter(k => !prim.includes(k) && (CATS[D.latest[k].p.cat] ? D.latest[k].p.cat : "other") === S.histCat)
+    .sort((a,b) => (ord.indexOf(a) < 0 ? 999 : ord.indexOf(a)) - (ord.indexOf(b) < 0 ? 999 : ord.indexOf(b))));
+  const stOf = (k, p) => prim.includes(k) ? heartStatus(heartOf(k), p) : statusOf(p);
   if (!keys.length) { $("#histList").innerHTML = ""; $("#histChart").innerHTML = `<div class="empty">No results yet.</div>`; $("#mx").innerHTML = ""; return; }
-  if (!S.histKey || !keys.includes(S.histKey)) S.histKey = keys.find(k => isScored(D.latest[k].p) && statusOf(D.latest[k].p) !== "ok") || keys[0];
-  $("#histList").innerHTML = keys.map(k => { const p = D.latest[k].p; return `<button data-k="${esc(k)}" aria-pressed="${k === S.histKey}"><span>${esc(p.name)}</span><span class="row" style="gap:6px"><span class="muted small mono">${D.series[k].length}×</span><span class="dot ${statusOf(p)}"></span></span></button>`; }).join("");
+  if (!S.histKey || !keys.includes(S.histKey)) S.histKey = prim[0] || keys.find(k => isScored(D.latest[k].p) && statusOf(D.latest[k].p) !== "ok") || keys[0];
+  const li = k => { const p = D.latest[k].p, h = prim.includes(k) ? heartOf(k) : null; return `<button data-k="${esc(k)}" aria-pressed="${k === S.histKey}"><span>${h ? `<b>${esc(h.n)}</b>` : esc(p.name)}</span><span class="row" style="gap:6px"><span class="muted small mono">${D.series[k].length}×</span><span class="dot ${stOf(k, p)}"></span></span></button>`; };
+  $("#histList").innerHTML = isHeart
+    ? `<div class="eyebrow" style="padding:6px 10px 2px">Primary · your targets</div>${prim.map(li).join("")}${missing.map(h => `<button disabled title="Not in any of your reports yet" style="opacity:.55"><span>${esc(h.n)}</span><span class="small muted">not tested</span></button>`).join("")}
+       <div class="eyebrow" style="padding:12px 10px 2px">Lipid panel</div>${keys.filter(k => !prim.includes(k)).map(li).join("")}`
+    : keys.map(li).join("");
   $("#histList").querySelectorAll("button").forEach(b => b.onclick = () => { S.histKey = b.dataset.k; renderHistory(); });
-  const s = D.series[S.histKey], lp = s[s.length-1].p;
-  $("#histTitle").textContent = lp.name;
-  $("#histSub").textContent = `${s.length} test${s.length > 1 ? "s" : ""} · ${fmtShort(s[0].date)} to ${fmtShort(s[s.length-1].date)} · range ${lp.ref || "—"}${lp.unit ? " " + lp.unit : ""}`;
-  $("#histChip").innerHTML = chip(statusOf(lp), `Latest: ${STLABEL[statusOf(lp)]}`) + ` <button class="pill-btn" id="histAbout" type="button">What is this?</button>`;
+  const s = D.series[S.histKey], lp = s[s.length-1].p, hh = prim.includes(S.histKey) ? heartOf(S.histKey) : null, ht = hh ? heartTarget(hh, lp.unit) : null;
+  $("#histTitle").textContent = hh ? `${hh.n}${hh.n !== lp.name ? ` (${lp.name})` : ""}` : lp.name;
+  $("#histSub").textContent = `${s.length} test${s.length > 1 ? "s" : ""} · ${fmtShort(s[0].date)} to ${fmtShort(s[s.length-1].date)} · ${ht ? `your target ${ht.label} · lab range ${lp.ref || "—"}` : `range ${lp.ref || "—"}${lp.unit ? " " + lp.unit : ""}`}`;
+  $("#histChip").innerHTML = (hh ? chip(heartStatus(hh, lp), `Latest: ${HEART_ST[heartStatus(hh, lp)]}`) : chip(statusOf(lp), `Latest: ${STLABEL[statusOf(lp)]}`)) + ` <button class="pill-btn" id="histAbout" type="button">What is this?</button>`;
   $("#histAbout").onclick = () => openMarker(S.histKey);
-  const pts = s.map(e => ({x:e.date, y:numVal(e.p.value), st:statusOf(e.p)})).filter(p => p.y != null);
-  lineChart($("#histChart"), pts, {low: lp.low, high: lp.high, unit: lp.unit, aria: `${lp.name} over time`});
+  const pts = s.map(e => ({x:e.date, y:numVal(e.p.value), st: hh ? heartStatus(hh, e.p) : statusOf(e.p)})).filter(p => p.y != null);
+  lineChart($("#histChart"), pts, hh ? {low: null, high: ht.v, unit: lp.unit, aria: `${hh.n} over time against your target`} : {low: lp.low, high: lp.high, unit: lp.unit, aria: `${lp.name} over time`});
   const t = trendOf(S.histKey); const first = pts[0], last = pts[pts.length-1];
   $("#histNote").innerHTML = pts.length > 1 ? `Change since first test: <b class="mono">${last.y - first.y >= 0 ? "+" : ""}${fmtN(last.y - first.y)}</b> ${esc(lp.unit)} (${first.y ? fmtN((last.y-first.y)/Math.abs(first.y)*100,0) : "—"}%). ${t ? (t.dir === "better" ? "Latest move is toward the healthy range." : t.dir === "worse" ? "Latest move is away from the healthy range." : "") : ""} Shaded band = reference range.` : "Only one test so far. A second one will show the trend.";
+  if (hh && pts.length) { const f0 = pts[0], l0 = pts[pts.length - 1], pv = pts.length > 1 ? pts[pts.length - 2].y : null;
+    $("#histNote").innerHTML = `${pts.length > 1 ? `Change since first test: <b class="mono">${l0.y - f0.y >= 0 ? "+" : ""}${fmtN(l0.y - f0.y)}</b> ${esc(lp.unit || "")}. Latest move is ${l0.y < pv ? "<b>toward</b>" : l0.y > pv ? "<b>away from</b>" : "flat against"} your target. ` : ""}${l0.y < ht.v ? "Now under target." : `Now <b class="mono">${fmtN(l0.y - ht.v)}</b> ${esc(lp.unit || "")} above your target.`} Shaded band = your target (${esc(ht.label)}). ${esc(hh.n)}: ${esc(hh.why)}.`; }
   // matrix
   const dates = D.bloodDates;
   const head = `<thead><tr><th>${esc(CATS[S.histCat].name)}</th>${dates.map(d => `<th>${fmtShort(d)}</th>`).join("")}<th>Range</th></tr></thead>`;
-  const body = keys.map(k => { const by = Object.fromEntries(D.series[k].map(e => [e.date, e.p])); const lp2 = D.latest[k].p;
-    return `<tr data-k="${esc(k)}"><td title="${esc(lp2.name)}">${esc(lp2.name)}</td>${dates.map(d => { const p = by[d]; if (!p) return `<td class="c"><span class="muted">·</span></td>`; const st = statusOf(p); return `<td class="c"><span class="${st}" title="${esc(STLABEL[st])}">${fmtN(numVal(p.value) ?? p.value)}${st === "out" ? " ✕" : st === "border" ? " !" : ""}</span></td>`; }).join("")}<td class="small muted">${esc(lp2.ref || "")}</td></tr>`; }).join("");
+  const body = keys.map(k => { const by = Object.fromEntries(D.series[k].map(e => [e.date, e.p])); const lp2 = D.latest[k].p, h2 = prim.includes(k) ? heartOf(k) : null;
+    return `<tr data-k="${esc(k)}"${h2 && k === prim[prim.length - 1] ? ' style="border-bottom:2px solid var(--line)"' : ""}><td title="${esc(lp2.name)}">${h2 ? `<b>${esc(h2.n)}</b>` : esc(lp2.name)}</td>${dates.map(d => { const p = by[d]; if (!p) return `<td class="c"><span class="muted">·</span></td>`; const st = h2 ? heartStatus(h2, p) : statusOf(p); return `<td class="c"><span class="${st}" title="${esc(h2 ? HEART_ST[st] : STLABEL[st])}">${fmtN(numVal(p.value) ?? p.value)}${st === "out" ? " ✕" : st === "border" ? " !" : ""}</span></td>`; }).join("")}<td class="small muted">${h2 ? `<b>Target ${esc(heartTarget(h2, lp2.unit).label)}</b>` : esc(lp2.ref || "")}</td></tr>`; }).join("");
   $("#mxTitle").textContent = `${CATS[S.histCat].name}: all tests side by side`;
   $("#mx").innerHTML = head + `<tbody>${body}</tbody>`;
   $("#mx").querySelectorAll("tbody tr").forEach(r => r.onclick = () => { S.histKey = r.dataset.k; renderHistory(); $("#histChart").scrollIntoView({behavior:"smooth", block:"center"}); });
