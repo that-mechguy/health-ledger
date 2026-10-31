@@ -239,7 +239,8 @@ root.innerHTML = `
           <div class="full row" style="justify-content:flex-end"><button class="btn" type="button" id="nuManX">Cancel</button><button class="btn primary" type="submit">Add</button></div>
         </form>
       </div>
-      <div class="card"><div class="card-h"><h2>Diary</h2><span class="hint" id="nuDiaryHint"></span></div><div id="nuDiary"></div></div>
+      <div class="card"><div class="card-h"><h2>Diary</h2><span class="hint" id="nuDiaryHint"></span></div><div id="nuDiary"></div>
+        <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" id="nuExport" type="button">Copy last 30 days</button></div></div>
     </div>
 
     <div class="grid g2">
@@ -618,6 +619,24 @@ function setSt(el, html, bad){ el.className = "nu-status" + (bad ? " err" : "");
 const CATS = window.NU_FOOD_CATS || {};
 const FD = (window.NU_FOODS || []).map(([name, local, cat, sub, chain, servDesc, servG, kcal, p, c, f, na, alc], i) =>
   ({ i, name, local, cat, sub, chain, servDesc, servG, kcal, p, c, f, na, alc: alc || 0, hay: normQ([name, local, sub, chain, CATS[cat] || ""].join(" ")) }));
+/* ---------- export: the last 30 days as plain text (paste into a chat with Claude, or a spreadsheet) ---------- */
+async function exportLog(days = 30){
+  const from = addDays(N.today, -(days - 1)); await ensureLoaded(from);
+  const P = N.plan, mic = (e, k) => { const m = (e.micros || []).find(x => x.n === k || (MIK[x.n] || microKey(x.n))?.k === k); return m ? r1(+m.amt) : ""; };
+  const lines = [`Health Ledger food log ${from} to ${N.today} · targets ${P.kcal} kcal, protein ${P.protein} g, carbs ${P.carbs} g, fat ${P.fat} g, sodium ${P.sodiumMg} mg`,
+    "date,meal,food,serving,kcal,protein_g,carbs_g,fat_g,sodium_mg,fibre_g,satfat_g,sugar_g,alcohol_g"];
+  const q2 = t => /[",\n]/.test(t) ? `"${String(t).replace(/"/g, '""')}"` : t;
+  const days2 = [];
+  for (let i = days - 1; i >= 0; i--) { const d = addDays(N.today, -i), items = dayItems(d); if (!items.length) continue; days2.push(d);
+    for (const e of items) lines.push([d, e.meal, q2(e.name), q2(e.serving || ""), r0(e.kcal), r1(e.p), r1(e.c), r1(e.f), e.na ?? "", mic(e, "fibre"), mic(e, "satfat"), mic(e, "sugar"), mic(e, "alcohol")].join(",")); }
+  lines.push("", "daily totals: date,kcal,protein_g,carbs_g,fat_g,sodium_mg,water_l");
+  for (const d of days2) { const t = totals(d); lines.push([d, r0(t.kcal), r1(t.p), r1(t.c), r1(t.f), r0(t.na), (waterOn(d) / 1000).toFixed(2)].join(",")); }
+  const text = lines.join("\n");
+  try { await navigator.clipboard.writeText(text); toast(`Copied ${days2.length} days (${lines.length - 4 - days2.length} items). Paste it into your chat with Claude.`); }
+  catch { const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>Your last ${days} days</h2>${closeBtn}</div><p class="small muted">Select all and copy.</p><textarea style="width:100%;height:50vh;font:12px var(--f-mono)" readonly>${e2(text)}</textarea>`); bg.querySelector("textarea").select(); }
+}
+q("#nuExport").onclick = () => exportLog(30);
+
 /* ---------- My foods: anything you log by estimate, photo, label or manual entry is remembered for one-tap search ---------- */
 const MYF = "my:";
 const myCode = n => MYF + normQ(n).replace(/\s+/g, "-").slice(0, 80);
