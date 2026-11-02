@@ -679,6 +679,7 @@ header.top.compact .refresh{width:30px;height:30px}
   <section class="view" id="v-settings" hidden>
     <div class="card" id="profileCard"></div>
     <div class="card" id="peopleCard" hidden></div>
+    <div class="card" id="familyCard" hidden></div>
     <div class="card" id="glCard">
       <div class="card-h"><h2>Your fitness tracker</h2><span class="hint" id="glHint"></span></div>
       <p cla<p class="small" style="margin:0 0 10px">Works with almost any tracker, free, through the <b>Google Health</b> app (formerly the Fitbit app). Steps, heart rate, sleep and more arrive here every 15 minutes, and your food log can be sent back. No tracker? Skip this; nutrition, medicines and reports all work without one.</p>
@@ -741,11 +742,11 @@ header.top.compact .refresh{width:30px;height:30px}
       <div class="row" role="tablist" style="gap:6px"><button type="button" class="pill-btn" id="lgModeIn" aria-pressed="true">Sign in</button><button type="button" class="pill-btn" id="lgModeUp" aria-pressed="false">Create account</button></div>
       <p class="small muted" id="lgIntro" style="margin:0">Welcome back. Sign in to see your health data.</p>
       <label id="lgNameL" hidden>Your name<input type="text" id="lgName" autocomplete="name" placeholder="e.g. Rahul"></label>
-      <label>Email<input type="email" id="lgEmail" autocomplete="username" required></label>
+      <label><span id="lgEmailL">Email or username</span><input type="text" inputmode="email" autocapitalize="none" spellcheck="false" id="lgEmail" autocomplete="username" required></label>
       <label>Password<input type="password" id="lgPass" autocomplete="current-password" minlength="8" required></label>
       <button class="btn primary" type="submit" id="lgBtn">Sign in</button>
       <div class="small" id="lgMsg"></div>
-      <p class="small muted" style="margin:0">Your data is private to your account. Nobody else using this site can see it.</p>
+      <p class="small muted" style="margin:0">Your data is private to your account. If a family member created your account for you, they can view it (read-only).</p>
     </form>
   </div>
 </div>
@@ -1445,12 +1446,24 @@ const CFG = (() => {
   return { url: url.replace(/\/+$/, ""), key };
 })();
 let SB = null;
-S.uid = null; S.email = null; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] };
+S.uid = null; S.email = null; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; S.vid = null; S.vname = "";
+/* whose dashboard is on screen: your own, or a family member's (read-only, see family.js) */
+const VID = () => S.vid || S.uid, VIEWING = () => !!(S.vid && S.uid && S.vid !== S.uid);
+window.HL_VID = VID; window.HL_VIEWING = VIEWING;
+/* while viewing someone else, every write is refused here (the database refuses them too) */
+function guardWrites(sb){
+  const ro = () => { const r = { data: null, error: { message: `You're viewing ${S.vname || "someone else"}'s dashboard, which is read-only. Switch back to yours to make changes.` } };
+    const p = new Proxy(function(){}, { get: (_, k) => k === "then" ? (a, b) => Promise.resolve(r).then(a, b) : () => p, apply: () => p }); return p; };
+  const wrap = b => { if (VIEWING()) for (const m of ["insert", "upsert", "update", "delete", "upload", "remove", "move", "copy"]) if (typeof b[m] === "function") b[m] = ro; return b; };
+  const f = sb.from.bind(sb); sb.from = t => wrap(f(t));
+  const sf = sb.storage.from.bind(sb.storage); sb.storage.from = t => wrap(sf(t));
+  const inv = sb.functions.invoke.bind(sb.functions); sb.functions.invoke = (n, o) => VIEWING() && n !== "family-admin" ? ro() : inv(n, o);
+}
 
 async function fetchAllHealth(){
   const out = {}; const n = v => v == null ? null : Number(v);
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await SB.from("health_daily").select("day,steps,active_kcal,resting_hr,hrv_ms,weight_kg,sleep_h,hr_avg,hr_min,hr_max,bp_sys,bp_dia,bp_at,spo2,resp_rate,source,updated_at").order("day").range(from, from + 999);
+    const { data, error } = await SB.from("health_daily").select("day,steps,active_kcal,resting_hr,hrv_ms,weight_kg,sleep_h,hr_avg,hr_min,hr_max,bp_sys,bp_dia,bp_at,spo2,resp_rate,source,updated_at").eq("user_id", VID()).order("day").range(from, from + 999);
     if (error) throw error;
     for (const x of data) out[x.day] = { s: n(x.steps), k: n(x.active_kcal), h: n(x.resting_hr), hrv: n(x.hrv_ms), w: n(x.weight_kg), sl: n(x.sleep_h),
       hra: n(x.hr_avg), hrmin: n(x.hr_min), hrmax: n(x.hr_max), bps: n(x.bp_sys), bpd: n(x.bp_dia), bpat: x.bp_at, o2: n(x.spo2), rr: n(x.resp_rate), src: x.source, at: x.updated_at };
@@ -1464,7 +1477,7 @@ async function loadAll(){
   const btn = $("#refreshBtn"); btn?.classList.add("spin");
   try {
     const [r, h, st, k] = await Promise.all([
-      SB.from("reports").select("id,type,date,doc,file_path").order("date", { ascending: false }),
+      SB.from("reports").select("id,type,date,doc,file_path").eq("user_id", VID()).order("date", { ascending: false }),
       fetchAllHealth(),
       SB.from("user_settings").select("*").maybeSingle(),
       SB.from("ingest_keys").select("key,created_at,last_used").order("created_at"),
@@ -1738,7 +1751,7 @@ async function loadHourly(d){
   if (d in hourlyCache) return hourlyCache[d];
   hourlyCache[d] = [];
   try {
-    const { data, error } = await SB.from("health_samples").select("src,ts,v").eq("kind", "steps").eq("day", d).limit(5000);
+    const { data, error } = await SB.from("health_samples").select("src,ts,v").eq("user_id", VID()).eq("kind", "steps").eq("day", d).limit(5000);
     if (error) throw error;
     const bySrc = {};
     for (const x of data) { if (String(x.ts).slice(11, 19) === "00:00:00") continue; const h = parseInt(String(x.ts).slice(11, 13), 10); if (isNaN(h)) continue; (bySrc[x.src] ||= Array(24).fill(0))[h] += Number(x.v); }
@@ -1900,7 +1913,7 @@ $("#pdSave").onclick = async () => {
 async function dataCheck(){
   const out = $("#dcOut"); out.innerHTML = `<div class="empty small">Checking…</div>`;
   const d = todayISO();
-  const { data, error } = await SB.from("health_samples").select("src,ts,v").eq("kind", "steps").eq("day", d).limit(5000);
+  const { data, error } = await SB.from("health_samples").select("src,ts,v").eq("user_id", VID()).eq("kind", "steps").eq("day", d).limit(5000);
   if (error) { out.innerHTML = `<div class="small" style="color:var(--bad)">${esc(error.message)}</div>`; return; }
   const hm = t => String(t).slice(11, 16);
   const by = {};
@@ -1955,14 +1968,14 @@ $("#gateCfg").onsubmit = e => {
 };
 $("#gateLogin").onsubmit = async e => {
   e.preventDefault(); if (lgMode === "up") return createAccount(); $("#lgBtn").disabled = true; toastMsg("#lgMsg", "Signing in…");
-  const { data, error } = await SB.auth.signInWithPassword({ email: $("#lgEmail").value.trim(), password: $("#lgPass").value });
+  const { data, error } = await SB.auth.signInWithPassword({ email: (v => v.includes("@") ? v : v.toLowerCase() + "@family.local")($("#lgEmail").value.trim()), password: $("#lgPass").value });
   $("#lgBtn").disabled = false;
-  if (error) return toastMsg("#lgMsg", error.message === "Invalid login credentials" ? "Email or password is wrong." : esc(error.message), true);
+  if (error) return toastMsg("#lgMsg", error.message === "Invalid login credentials" ? "Email/username or password is wrong." : esc(error.message), true);
   await onSignedIn(data.session);
 };
 let lgMode = "in";
 function setLgMode(m){
-  lgMode = m; const up = m === "up";
+  lgMode = m; const up = m === "up"; $("#lgEmailL").textContent = up ? "Email" : "Email or username";
   $("#lgModeIn").setAttribute("aria-pressed", String(!up)); $("#lgModeUp").setAttribute("aria-pressed", String(up));
   $("#lgNameL").hidden = !up; $("#lgName").required = up;
   $("#lgPass").autocomplete = up ? "new-password" : "current-password";
@@ -1975,7 +1988,7 @@ try { if (/[?&]signup\b/.test(location.search)) setLgMode("up"); } catch (e) {}
 async function createAccount(){
   const name = $("#lgName").value.trim(), email = $("#lgEmail").value.trim(), pw = $("#lgPass").value;
   if (!name) return toastMsg("#lgMsg", "Add your name.", true);
-  if (!email || pw.length < 8) return toastMsg("#lgMsg", "Enter your email and a password of at least 8 characters.", true);
+  if (!email.includes("@") || pw.length < 8) return toastMsg("#lgMsg", "Enter your email and a password of at least 8 characters.", true);
   $("#lgBtn").disabled = true; toastMsg("#lgMsg", "Creating your account…");
   const { data, error } = await SB.auth.signUp({ email, password: pw, options: { data: { name }, emailRedirectTo: location.origin + location.pathname } });
   $("#lgBtn").disabled = false;
@@ -1985,7 +1998,7 @@ async function createAccount(){
   toastMsg("#lgMsg", "Account created. Check your inbox for a confirmation email, tap the link, then sign in here.");
 }
 async function onSignedIn(session){
-  S.uid = session.user.id; S.email = session.user.email; S.meta = session.user.user_metadata || {};
+  S.uid = session.user.id; S.email = session.user.email; S.meta = session.user.user_metadata || {}; S.vid = null; S.vname = "";
   $("#gate").hidden = true;
   aiStatus();
   await loadAll();
@@ -2113,7 +2126,7 @@ async function loadHrSamples(){
     const out = {}; const start = dayShift(todayISO(), -59);
     try {
       for (let from = 0; ; from += 1000) {
-        const { data, error } = await SB.from("health_samples").select("ts,v,day").eq("kind", "hr").gte("day", start).order("ts").range(from, from + 999);
+        const { data, error } = await SB.from("health_samples").select("ts,v,day").eq("user_id", VID()).eq("kind", "hr").gte("day", start).order("ts").range(from, from + 999);
         if (error) throw error;
         for (const x of data) { if (String(x.ts).slice(11, 19) === "00:00:00") continue; (out[x.day] ||= []).push({ ts: x.ts, v: Number(x.v) }); }
         if (data.length < 1000) break;
@@ -3069,8 +3082,8 @@ renderAll();
 (async () => {
   if (!window.supabase || !window.supabase.createClient) { notice("Couldn't load the Supabase library. Check your internet connection and reload."); return; }
   if (!CFG.url || !CFG.key) { showGate("cfg"); return; }
-  SB = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "hl-auth" } });
-  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { window.NUT?.reset(); window.HLP?.reset(); S.uid = null; S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
+  SB = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "hl-auth" } }); guardWrites(SB);
+  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { window.NUT?.reset(); window.HLP?.reset(); S.uid = null; S.vid = null; S.vname = ""; window.HLF?.reset?.(); S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
   const { data: { session } } = await SB.auth.getSession();
   if (!session) showGate("login"); else await onSignedIn(session);
 })();
@@ -3151,7 +3164,8 @@ renderAll();
 })();
 </script>
 <script src="foods.js?v=20261022b"></script>
-<script src="people.js?v=20261023a"></script>
-<script src="nutrition.js?v=20261031a"></script>
+<script src="people.js?v=20261102a"></script>
+<script src="family.js?v=20261102a"></script>
+<script src="nutrition.js?v=20261102a"></script>
 </body>
 </html>

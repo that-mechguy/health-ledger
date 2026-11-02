@@ -123,21 +123,21 @@ async function load(){
   if (!S?.uid) return;
   const from = addD(ld(), -60);
   const [pr, md, lg, ad] = await Promise.all([
-    sb().from("user_profile").select("doc").maybeSingle(),
-    sb().from("medications").select("id,doc,active"),
-    sb().from("med_log").select("id,med_id,day,slot,status,qty,at").gte("day", from),
-    sb().from("app_admins").select("user_id").maybeSingle()
+    sb().from("user_profile").select("doc").eq("user_id", (window.HL_VID?.() || S.uid)).maybeSingle(),
+    sb().from("medications").select("id,doc,active").eq("user_id", (window.HL_VID?.() || S.uid)),
+    sb().from("med_log").select("id,med_id,day,slot,status,qty,at").eq("user_id", (window.HL_VID?.() || S.uid)).gte("day", from),
+    sb().from("app_admins").select("user_id").eq("user_id", S.uid).maybeSingle()
   ]);
   F.missing = [pr, md, lg].some(r => r.error && /relation|schema cache|does not exist/i.test(r.error.message || ""));
   F.profile = pr.data?.doc && Object.keys(pr.data.doc).length ? pr.data.doc : null; F.profileLoaded = !pr.error;
   F.meds = (md.data || []).map(x => ({ ...x.doc, id: x.id, active: x.active }));
   F.log = lg.data || [];
-  F.admin = !!ad.data; F.uid = S.uid;
+  F.admin = !!ad.data; F.uid = S.uid; F.vid = window.HL_VID?.() || S.uid;
 }
 function reset(){ F.profile = null; F.profileLoaded = false; F.meds = []; F.log = []; F.admin = false; F.uid = null; F.onboardShown = false; }
 async function afterLoad(){
-  if (F.uid !== S?.uid) { await load().catch(() => {}); renderSettingsCards(); window.NUT?.render?.(); }
-  if (F.missing || !F.profileLoaded || F.profile || F.onboardShown) return;
+  if (F.uid !== S?.uid || F.vid !== (window.HL_VID?.() || S?.uid)) { await load().catch(() => {}); renderSettingsCards(); window.NUT?.render?.(); }
+  if (F.missing || !F.profileLoaded || F.profile || F.onboardShown || window.HL_VIEWING?.()) return;
   try { if (sessionStorage.getItem("hl-onboard-later")) return; } catch {}
   F.onboardShown = true;
   for (let i = 0; i < 40 && !window.NUT?.isLoaded?.(); i++) await new Promise(r => setTimeout(r, 150));   // so the form can be prefilled from an existing plan

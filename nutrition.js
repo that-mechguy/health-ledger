@@ -285,8 +285,8 @@ const rowToEntry = r => ({ id: r.id, date: r.day, meal: r.meal, name: r.name, se
 async function fetchRange(from, to){
   const db = sb();
   const [e, w] = await Promise.all([
-    db.from("food_entries").select("*").gte("day", from).lte("day", to).order("created_at").range(0, 4999),
-    db.from("water_log").select("id,day,ml,created_at").gte("day", from).lte("day", to).range(0, 4999)]);
+    db.from("food_entries").select("*").eq("user_id", (window.HL_VID?.() || S.uid)).gte("day", from).lte("day", to).order("created_at").range(0, 4999),
+    db.from("water_log").select("id,day,ml,created_at").eq("user_id", (window.HL_VID?.() || S.uid)).gte("day", from).lte("day", to).range(0, 4999)]);
   if (e.error) throw e.error; if (w.error) throw w.error;
   return { entries: e.data.map(rowToEntry), water: w.data.map(x => ({ id: x.id, date: x.day, ml: +x.ml })) };
 }
@@ -297,9 +297,9 @@ NU.load = async function(){
     const from = addDays(N.today, -WINDOW);
     const [rng, pr, sp, pl] = await Promise.all([
       fetchRange(from, N.today),
-      db.from("food_products").select("code,doc,used_at"),
-      db.from("supplements").select("id,doc,active"),
-      db.from("nutrition_plan").select("plan").maybeSingle()]);
+      db.from("food_products").select("code,doc,used_at").eq("user_id", (window.HL_VID?.() || S.uid)),
+      db.from("supplements").select("id,doc,active").eq("user_id", (window.HL_VID?.() || S.uid)),
+      db.from("nutrition_plan").select("plan").eq("user_id", (window.HL_VID?.() || S.uid)).maybeSingle()]);
     if (pr.error || sp.error) throw (pr.error || sp.error);
     if (pl.error && !/nutrition_plan/.test(pl.error.message || "")) throw pl.error;
     const older = N.entries.filter(x => x.date < from), olderW = N.water.filter(x => x.date < from);
@@ -652,7 +652,7 @@ async function rememberFoods(list){
 }
 // one-time fill from your existing diary: every food you've estimated or entered before becomes searchable
 async function backfillMyFoods(){
-  if (N.myBackfilled || !N.loaded) return; N.myBackfilled = true;
+  if (N.myBackfilled || !N.loaded || window.HL_VIEWING?.()) return; N.myBackfilled = true;
   const latest = {};
   for (const e of N.entries) {
     if (e.meal === "supplements" || e.barcode || ["database", "supplement", "mine"].includes(e.src)) continue;
