@@ -1446,18 +1446,20 @@ const CFG = (() => {
   return { url: url.replace(/\/+$/, ""), key };
 })();
 let SB = null;
-S.uid = null; S.email = null; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; S.vid = null; S.vname = "";
+S.uid = null; S.email = null; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; S.vid = null; S.vname = ""; S.vmode = "full";
 /* whose dashboard is on screen: your own, or a family member's (read-only, see family.js) */
 const VID = () => S.vid || S.uid, VIEWING = () => !!(S.vid && S.uid && S.vid !== S.uid);
 window.HL_VID = VID; window.HL_VIEWING = VIEWING;
 /* while viewing someone else, every write is refused here (the database refuses them too) */
 function guardWrites(sb){
-  const ro = () => { const r = { data: null, error: { message: `You're viewing ${S.vname || "someone else"}'s dashboard, which is read-only. Switch back to yours to make changes.` } };
+  const ro = () => { const r = { data: null, error: { message: `You're viewing ${S.vname || "someone else"}'s dashboard, which is read-only here. Switch back to yours to make changes.` } };
     const p = new Proxy(function(){}, { get: (_, k) => k === "then" ? (a, b) => Promise.resolve(r).then(a, b) : () => p, apply: () => p }); return p; };
-  const wrap = b => { if (VIEWING()) for (const m of ["insert", "upsert", "update", "delete", "upload", "remove", "move", "copy"]) if (typeof b[m] === "function") b[m] = ro; return b; };
-  const f = sb.from.bind(sb); sb.from = t => wrap(f(t));
-  const sf = sb.storage.from.bind(sb.storage); sb.storage.from = t => wrap(sf(t));
-  const inv = sb.functions.invoke.bind(sb.functions); sb.functions.invoke = (n, o) => VIEWING() && n !== "family-admin" ? ro() : inv(n, o);
+  // "reports only" family members: you may manage their reports and profile (the database allows exactly this)
+  const ok = t => !VIEWING() || t === "marker_info" || (S.vmode === "reports" && ["reports", "user_profile"].includes(t));
+  const wrap = (b, t) => { if (!ok(t)) for (const m of ["insert", "upsert", "update", "delete", "upload", "remove", "move", "copy"]) if (typeof b[m] === "function") b[m] = ro; return b; };
+  const f = sb.from.bind(sb); sb.from = t => wrap(f(t), t);
+  const sf = sb.storage.from.bind(sb.storage); sb.storage.from = t => wrap(sf(t), t);
+  const inv = sb.functions.invoke.bind(sb.functions); sb.functions.invoke = (n, o) => VIEWING() && n !== "family-admin" && !(n === "claude-proxy" && S.vmode === "reports") ? ro() : inv(n, o);
 }
 
 async function fetchAllHealth(){
@@ -1536,14 +1538,14 @@ $("#manBtn").onclick = async () => {
 /* ---- reports: files, save, delete ---- */
 async function uploadReportFile(id, file){
   const ext = ((file.name.split(".").pop() || "pdf").toLowerCase()).replace(/[^a-z0-9]/g, "") || "pdf";
-  const path = `${S.uid}/${id}.${ext}`;
+  const path = `${VID()}/${id}.${ext}`;
   const { error } = await SB.storage.from("reports").upload(path, file, { upsert: true, contentType: file.type || (ext === "pdf" ? "application/pdf" : "image/jpeg") });
   if (error) throw error;
   return path;
 }
 async function saveReportRow(doc, file){
   const path = file ? await uploadReportFile(doc.id, file) : null;
-  const { error } = await SB.from("reports").insert({ id: doc.id, type: doc.type, date: doc.date, doc: { ...doc, fileName: file ? file.name : null }, file_path: path });
+  const { error } = await SB.from("reports").insert({ user_id: VID(), id: doc.id, type: doc.type, date: doc.date, doc: { ...doc, fileName: file ? file.name : null }, file_path: path });
   if (error) { if (path) await SB.storage.from("reports").remove([path]); throw error; }
 }
 async function openFile(path){
@@ -1998,7 +2000,7 @@ async function createAccount(){
   toastMsg("#lgMsg", "Account created. Check your inbox for a confirmation email, tap the link, then sign in here.");
 }
 async function onSignedIn(session){
-  S.uid = session.user.id; S.email = session.user.email; S.meta = session.user.user_metadata || {}; S.vid = null; S.vname = "";
+  S.uid = session.user.id; S.email = session.user.email; S.meta = session.user.user_metadata || {}; S.vid = null; S.vname = ""; S.vmode = "full";
   $("#gate").hidden = true;
   aiStatus();
   await loadAll();
@@ -3083,7 +3085,7 @@ renderAll();
   if (!window.supabase || !window.supabase.createClient) { notice("Couldn't load the Supabase library. Check your internet connection and reload."); return; }
   if (!CFG.url || !CFG.key) { showGate("cfg"); return; }
   SB = window.supabase.createClient(CFG.url, CFG.key, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "hl-auth" } }); guardWrites(SB);
-  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { window.NUT?.reset(); window.HLP?.reset(); S.uid = null; S.vid = null; S.vname = ""; window.HLF?.reset?.(); S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
+  SB.auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT") { window.NUT?.reset(); window.HLP?.reset(); S.uid = null; S.vid = null; S.vname = ""; S.vmode = "full"; window.HLF?.reset?.(); S.reports = []; S.activity = {}; S.settings = {}; S.sync = { lastUsed: null, keys: [], raw: [] }; renderAll(); showGate("login"); } });
   const { data: { session } } = await SB.auth.getSession();
   if (!session) showGate("login"); else await onSignedIn(session);
 })();
@@ -3164,8 +3166,8 @@ renderAll();
 })();
 </script>
 <script src="foods.js?v=20261022b"></script>
-<script src="people.js?v=20261102a"></script>
-<script src="family.js?v=20261102a"></script>
+<script src="people.js?v=20261102b"></script>
+<script src="family.js?v=20261102b"></script>
 <script src="nutrition.js?v=20261102a"></script>
 </body>
 </html>

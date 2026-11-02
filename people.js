@@ -149,7 +149,7 @@ setTimeout(() => { if (typeof S !== "undefined" && S.uid && S.loadedR) afterLoad
 /* ---------- profile sheet (first sign-in and Settings → Edit) ---------- */
 function openProfile(first){
   const plan = window.NUT?.plan?.() || {};
-  const p = F.profile || { name: S.meta?.name || "", sex: plan.sex, heightCm: plan.heightCm, weightKg: plan.startKg, goalKg: plan.goalKg, activity: plan.activity, goal: "lose", age: plan.age, conditions: plan.kidney ? ["single_kidney"] : [] };
+  const p = F.profile || { name: (window.HL_VIEWING?.() ? S.vname : S.meta?.name) || "", sex: plan.sex, heightCm: plan.heightCm, weightKg: plan.startKg, goalKg: plan.goalKg, activity: plan.activity, goal: "lose", age: plan.age, conditions: plan.kidney ? ["single_kidney"] : [] };
   const lf = labFlags();
   const condBox = g => CONDITIONS.filter(c => c.g === g).map(c => `<label><input type="checkbox" name="cond" value="${c.k}" ${(p.conditions || []).includes(c.k) ? "checked" : ""}>${h(c.n)}</label>`).join("");
   const bg = sheet(`<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2>${first ? "Welcome! Set up your profile" : "Profile &amp; health"}</h2>${closeBtn}</div>
@@ -186,7 +186,7 @@ function openProfile(first){
       conditions: f.getAll("cond"), otherConditions: String(f.get("otherConditions") || "").trim(), allergies: String(f.get("allergies") || "").trim(), notes: String(f.get("notes") || "").trim() };
     if (!doc.dob && !doc.age) { toast("Add your date of birth or age."); return; }
     const btn = fm.querySelector("[type=submit]"); btn.disabled = true;
-    const { error } = await sb().from("user_profile").upsert({ user_id: S.uid, doc, updated_at: new Date().toISOString() });
+    const { error } = await sb().from("user_profile").upsert({ user_id: (window.HL_VID?.() || S.uid), doc, updated_at: new Date().toISOString() });
     btn.disabled = false;
     if (error) { toast("Couldn't save: " + error.message); return; }
     F.profile = doc; renderSettingsCards(); window.NUT?.render?.();
