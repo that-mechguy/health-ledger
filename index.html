@@ -1348,7 +1348,7 @@ $("#hkFile").onchange = async e => {
     // keep hourly step/energy records for the last 60 days, so later syncs add to the full day instead of replacing it
     const cutoff = iso(new Date(Date.now() - 59*864e5)); const rows = []; const touched = new Set();
     for (const [k, hrs] of Object.entries(minuteHours)) { const [t, d] = k.split("|"); if (d < cutoff) continue;
-      hrs.forEach((v, h) => { if (v > 0) rows.push({ user_id: S.uid, kind: t === "StepCount" ? "steps" : "kcal", src: hrs.src || "export", ts: `${d} ${String(h).padStart(2, "0")}:00:01 export`, day: d, v: Math.round(v * 10) / 10 }); });
+      hrs.forEach((v, h) => { if (v > 0) rows.push({ user_id: VID(), kind: t === "StepCount" ? "steps" : "kcal", src: hrs.src || "export", ts: `${d} ${String(h).padStart(2, "0")}:00:01 export`, day: d, v: Math.round(v * 10) / 10 }); });
       touched.add(d); }
     for (let i = 0; i < rows.length; i += 500) { const { error } = await SB.from("health_samples").upsert(rows.slice(i, i + 500), { onConflict: "user_id,kind,src,ts" }); if (error) throw error; }
     if (touched.size) { const { error } = await SB.rpc("recalc_activity", { days: [...touched] }); if (error) throw error; }
@@ -1455,7 +1455,7 @@ function guardWrites(sb){
   const ro = () => { const r = { data: null, error: { message: `You're viewing ${S.vname || "someone else"}'s dashboard, which is read-only here. Switch back to yours to make changes.` } };
     const p = new Proxy(function(){}, { get: (_, k) => k === "then" ? (a, b) => Promise.resolve(r).then(a, b) : () => p, apply: () => p }); return p; };
   // "managed by me" family members (mode "reports"): you may log food, medicines, readings and reports for them
-  const ok = t => !VIEWING() || t === "marker_info" || (S.vmode === "reports" && ["reports", "user_profile", "food_entries", "water_log", "food_products", "supplements", "nutrition_plan", "medications", "med_log", "health_daily"].includes(t));
+  const ok = t => !VIEWING() || t === "marker_info" || (S.vmode === "reports" && ["reports", "user_profile", "food_entries", "water_log", "food_products", "supplements", "nutrition_plan", "medications", "med_log", "health_daily", "health_samples"].includes(t));
   const wrap = (b, t) => { if (!ok(t)) for (const m of ["insert", "upsert", "update", "delete", "upload", "remove", "move", "copy"]) if (typeof b[m] === "function") b[m] = ro; return b; };
   const f = sb.from.bind(sb); sb.from = t => wrap(f(t), t);
   const sf = sb.storage.from.bind(sb.storage); sb.storage.from = t => wrap(sf(t), t);
@@ -1597,7 +1597,7 @@ function renderReports(){
 
 /* ---- Claude API (your own key) ---- */
 // AI is available with your own key (Settings) or through the shared key on the server (claude-proxy, daily cap)
-const hasAI = () => !!S.settings?.anthropic_key || (S.ai?.ready !== false && !(S.ai && !S.ai.admin && S.ai.cap === 0));
+const hasAI = () => !!S.settings?.anthropic_key || (S.ai?.ready !== false && !(S.ai && !S.ai.admin && !S.ai.unlimited && S.ai.cap === 0));
 window.hasAI = hasAI; window.aiStatusFresh = () => aiStatus();
 async function aiStatus(){
   try { const { data } = await SB.functions.invoke("claude-proxy", { body: { action: "status" } }); S.ai = data?.ok ? data : { ready: false }; }
@@ -1608,9 +1608,11 @@ async function claudeCall(content, { maxTokens = 2000 } = {}){
   const key = S.settings.anthropic_key;
   if (!key) {
     let data;
-    try { ({ data } = await SB.functions.invoke("claude-proxy", { body: { model: CLAUDE_MODEL, max_tokens: maxTokens, messages: [{ role: "user", content }] } })); }
+    let ierr;
+    try { ({ data, error: ierr } = await SB.functions.invoke("claude-proxy", { body: { model: CLAUDE_MODEL, max_tokens: maxTokens, messages: [{ role: "user", content }] } })); }
     catch (e) { throw { code: "network", message: "Couldn't reach the AI service. Check your internet connection." }; }
-    if (!data) throw { code: "no_proxy", message: "AI isn't set up for your account yet. Ask the account owner, or add your own Claude API key in Settings." };
+    if (!data) { let why = ierr?.message || ""; try { const j = await ierr?.context?.json?.(); why = j?.message || j?.error || why; } catch (e) {}
+      throw { code: "no_proxy", message: "AI isn't set up for your account yet. Ask the account owner, or add your own Claude API key in Settings." + (why ? ` (${esc(why)})` : "") }; }
     if (!data.ok) {
       if (/credit balance/i.test(data.message || "")) throw { code: "no_credit", message: "The shared Claude credit has run out. Ask the account owner to top up at console.anthropic.com." };
       throw { code: data.code || "proxy", message: data.message || "AI error" };
@@ -1849,7 +1851,7 @@ async function renderSettings(){
   $("#about").value = S.settings.about || "";
   loadSources(); renderGoogle(); window.HLP?.renderSettingsCards();
   $("#akeyState").textContent = S.settings.anthropic_key ? `Key saved (…${S.settings.anthropic_key.slice(-4)})` : "Using the shared key";
-  { const el = $("#aiUse"); if (el) el.innerHTML = S.settings.anthropic_key ? "" : S.ai?.ready ? (S.ai.admin ? "<b>Shared key: on</b> (you are not limited)." : `<b>Today: ${S.ai.used || 0} of ${S.ai.cap} AI actions used.</b>`) : S.ai ? `<b style="color:var(--bad)">The shared key isn't set up yet.</b>` : ""; }
+  { const el = $("#aiUse"); if (el) el.innerHTML = S.settings.anthropic_key ? "" : S.ai?.ready ? (S.ai.admin || S.ai.unlimited ? "<b>Shared key: on</b> (you are not limited)." : `<b>Today: ${S.ai.used || 0} of ${S.ai.cap} AI actions used.</b>`) : S.ai ? `<b style="color:var(--bad)">The shared key isn't set up yet.</b>` : ""; }
   const box = $("#syncSetup");
   if (!S.uid) { box.innerHTML = ""; return; }
   const key = S.sync.keys[S.sync.keys.length - 1]?.key;
@@ -3166,8 +3168,8 @@ renderAll();
 })();
 </script>
 <script src="foods.js?v=20261022b"></script>
-<script src="people.js?v=20261102c"></script>
-<script src="family.js?v=20261102c"></script>
-<script src="nutrition.js?v=20261102c"></script>
+<script src="people.js?v=20261102d"></script>
+<script src="family.js?v=20261102d"></script>
+<script src="nutrition.js?v=20261102d"></script>
 </body>
 </html>
