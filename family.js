@@ -28,7 +28,6 @@ css.textContent = `
 .fm-form input,.fm-form select{min-width:0;width:100%;box-sizing:border-box;font:inherit;color:var(--ink);padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface)}
 .fm-made{margin-top:12px;padding:12px;border-radius:12px;border:1px dashed var(--line);white-space:pre-wrap;font:13px/1.5 var(--f-mono,ui-monospace,monospace)}
 body.viewing .fm-hide-viewing{display:none!important}
-body.viewing-reports .tab[data-tab=activity],body.viewing-reports .tab[data-tab=nutrition],body.viewing-reports .tab[data-tab=meds],body.viewing-reports .tab[data-tab=readiness]{display:none!important}
 .fm-mode{font:inherit;font-size:13px;padding:6px 8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}`;
 document.head.appendChild(css);
 
@@ -55,7 +54,6 @@ async function viewAs(uid){
   S.reports = []; S.activity = {}; S.loadedR = S.loadedA = false;
   document.body.classList.toggle("viewing", !me);
   document.body.classList.toggle("viewing-reports", !me && S.vmode === "reports");
-  if (S.vmode === "reports" && ["activity", "nutrition", "meds", "readiness"].includes(S.tab)) try { go("reports"); } catch {}
   renderBar(); renderSwitcher();
   try { renderAll(); } catch {}
   await loadAll();
@@ -76,7 +74,7 @@ function renderBar(){
   if (!window.HL_VIEWING?.()) { bar?.remove(); return; }
   if (!bar) { bar = document.createElement("div"); bar.id = "fmBar"; bar.className = "fm-bar"; document.body.insertBefore(bar, document.body.firstChild); }
   bar.innerHTML = S.vmode === "reports"
-    ? `<span>Managing <b>${h(S.vname)}</b>'s reports · uploads here are saved to ${h(S.vname)}</span><button type="button" id="fmBack">Back to mine</button>`
+    ? `<span>Managing <b>${h(S.vname)}</b>'s dashboard · food, medicines and reports you add are saved to ${h(S.vname)}</span><button type="button" id="fmBack">Back to mine</button>`
     : `<span>Viewing <b>${h(S.vname)}</b>'s dashboard · read-only</span><button type="button" id="fmBack">Back to mine</button>`;
   bar.querySelector("#fmBack").onclick = () => viewAs(null);
 }
@@ -89,24 +87,24 @@ function renderCard(){
     if (!FA.viewers.length) { box.hidden = true; return; }
     box.hidden = false;
     box.innerHTML = `<div class="card-h"><h2>Who can see your dashboard</h2></div>
-      <p class="small" style="margin:0">The family member who created your account can <b>view</b> your food, medicines, reports and activity${FA.viewers.some(v => v.mode === "reports") ? ", and can add or remove your lab reports and edit your profile" : ""}. They can't see your Claude key.</p>`;
+      <p class="small" style="margin:0">The family member who created your account can <b>view</b> your food, medicines, reports and activity${FA.viewers.some(v => v.mode === "reports") ? ", and can log food, medicines and reports for you and edit your profile" : ""}. They can't see your Claude key.</p>`;
     return;
   }
   box.hidden = false;
   if (FA.missing) { box.innerHTML = `<div class="card-h"><h2>Family</h2></div><div class="notice">Run <b>15-family.sql</b> in Supabase first, and deploy the <b>family-admin</b> Edge Function (see the setup steps).</div>`; return; }
   const viewing = window.HL_VIEWING?.();
   box.innerHTML = `<div class="card-h"><h2>Family</h2><span class="hint">${FA.links.length} linked</span></div>
-    <p class="small muted" style="margin:0 0 10px"><b>Reports only</b> (good for parents): you upload their lab reports and fill in their profile; they never need to sign in. <b>Full app</b>: they sign in on their own phone and log food and medicines; you can view it read-only. Switch between people from the menu at the top. Friends who signed up themselves stay private.</p>
+    <p class="small muted" style="margin:0 0 10px"><b>Managed by me</b> (good for parents): you log their food, medicines, BP and reports and fill in their profile; they never need to sign in. <b>Full app</b>: they sign in on their own phone and log food and medicines; you can view it read-only. Switch between people from the menu at the top. Friends who signed up themselves stay private.</p>
     <div class="fm-list">${FA.links.map(x => `<div class="fm-item" data-m="${h(x.member)}">
-        <div class="who"><b>${h(x.name)}${x.relation ? ` <span class="fa-tag">${h(x.relation)}</span>` : ""}</b><span class="small muted">${(x.mode || "full") === "reports" ? "Reports only" : "Full app"} · sign-in: ${h(shortLogin(x.login))}</span></div>
+        <div class="who"><b>${h(x.name)}${x.relation ? ` <span class="fa-tag">${h(x.relation)}</span>` : ""}</b><span class="small muted">${(x.mode || "full") === "reports" ? "Managed by me" : "Full app"} · sign-in: ${h(shortLogin(x.login))}</span></div>
         <button class="btn" data-act="view">${S.vid === x.member ? "Viewing" : "View"}</button>
-        ${FA.noMode ? "" : `<select class="fm-mode fm-hide-viewing" data-act="mode" aria-label="Account type"><option value="reports"${x.mode === "reports" ? " selected" : ""}>Reports only</option><option value="full"${x.mode !== "reports" ? " selected" : ""}>Full app</option></select>`}
+        ${FA.noMode ? "" : `<select class="fm-mode fm-hide-viewing" data-act="mode" aria-label="Account type"><option value="reports"${x.mode === "reports" ? " selected" : ""}>Managed by me</option><option value="full"${x.mode !== "reports" ? " selected" : ""}>Full app</option></select>`}
         <button class="btn fm-hide-viewing" data-act="pw">New password</button>
         <button class="btn fm-hide-viewing" data-act="rm">Remove</button>
         <div class="fm-pw" hidden style="flex-basis:100%"></div></div>`).join("") || `<div class="empty">No family accounts yet.</div>`}</div>
     ${viewing ? `<p class="small muted">Switch back to your own dashboard to add or change family accounts.</p>` : `
     <form class="fm-form" id="fmForm" autocomplete="off">
-      <label>Account type<select name="mode"><option value="reports">Reports only (I upload their reports)</option><option value="full">Full app (they log in themselves)</option></select></label>
+      <label>Account type<select name="mode"><option value="reports">Managed by me (I log for them)</option><option value="full">Full app (they log in themselves)</option></select></label>
       <label>Name<input name="name" required placeholder="e.g. Mummy"></label>
       <label>Relation<select name="relation">${RELS.map(r => `<option>${r}</option>`).join("")}</select></label>
       <label>Username or email<input name="login" required placeholder="e.g. mummy" autocapitalize="none" spellcheck="false"></label>
@@ -123,7 +121,7 @@ function renderCard(){
     if (md) md.onchange = async () => {
       const { error } = await SB.from("family_links").update({ mode: md.value }).eq("owner", S.uid).eq("member", m);
       if (error) { toast("Couldn't change: " + error.message); md.value = x.mode || "full"; return; }
-      toast(md.value === "reports" ? `${x.name}: you can now upload their reports` : `${x.name}: full app, view-only for you`);
+      toast(md.value === "reports" ? `${x.name}: you can now log food, medicines and reports for them` : `${x.name}: full app, view-only for you`);
       await load(); renderSwitcher(); renderCard();
     };
     const rm = it.querySelector('[data-act="rm"]');
@@ -157,7 +155,7 @@ function renderCard(){
     if (!r.ok) { msg.style.color = "var(--bad)"; msg.textContent = r.message; return; }
     if (FA.noMode) v.mode = "full";
     FA.made = v.mode === "reports"
-      ? `${v.name} · reports only\nSign-in (only if they ever want to look): ${site()}\nUsername: ${shortLogin(r.login)}\nPassword: ${v.password}\n\nNext: pick ${v.name} in the menu at the top, open Settings to add their age and conditions, then upload their reports in the Reports tab.`
+      ? `${v.name} · managed by you\nSign-in (only if they ever want to look): ${site()}\nUsername: ${shortLogin(r.login)}\nPassword: ${v.password}\n\nNext: pick ${v.name} in the menu at the top, open Settings to add their age, height, weight and conditions (this sets their targets), then log food in Daily nutrition, medicines in Medicines and reports in Reports.`
       : `Health Ledger: ${site()}\nSign-in: ${shortLogin(r.login)}\nPassword: ${v.password}\n\nOpen the link, tap Sign in, then add your age, height, weight and any health conditions.`;
     await load(); renderSwitcher(); renderCard(); toast(`${v.name}'s account is ready`);
   };

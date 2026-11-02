@@ -352,7 +352,7 @@ function renderMeds(){
   };
 }
 async function logDose(id, slot, status, day, quiet){
-  const m = F.meds.find(x => x.id === id), row = { id: nid("l"), user_id: S.uid, med_id: id, day: day || ld(), slot, status, qty: +m?.qty || 1 };
+  const m = F.meds.find(x => x.id === id), row = { id: nid("l"), user_id: (window.HL_VID?.() || S.uid), med_id: id, day: day || ld(), slot, status, qty: +m?.qty || 1 };
   const { error } = await sb().from("med_log").insert(row);
   if (error) { toast("Couldn't save: " + error.message); renderMeds(); return; }
   F.log.push({ ...row, at: new Date().toISOString() }); if (quiet) return; renderMeds();
@@ -361,7 +361,7 @@ async function logDose(id, slot, status, day, quiet){
 async function unlog(lid, quiet){ const { error } = await sb().from("med_log").delete().eq("id", lid); if (error) { toast(error.message); return; } F.log = F.log.filter(x => x.id !== lid); if (!quiet) renderMeds(); }
 async function saveMed(m){
   const { id, active, ...doc } = m;
-  const { error } = await sb().from("medications").upsert({ id, user_id: S.uid, doc, active: active !== false, updated_at: new Date().toISOString() });
+  const { error } = await sb().from("medications").upsert({ id, user_id: (window.HL_VID?.() || S.uid), doc, active: active !== false, updated_at: new Date().toISOString() });
   if (error) { toast("Couldn't save: " + error.message); throw error; }
   const i = F.meds.findIndex(x => x.id === id); if (i >= 0) F.meds[i] = m; else F.meds.push(m);
   renderMeds(); renderSettingsCards();

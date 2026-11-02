@@ -328,7 +328,7 @@ async function addEntries(list){
   if (!requireLogin()) throw new Error("signed out");
   const now = Date.now();
   const rows = list.map((x, i) => ({
-    id: uid("e") + i, user_id: S.uid, day: x.date || N.day, meal: x.meal || N.meal, name: String(x.name || "Food").slice(0, 160), serving: String(x.serving || "").slice(0, 120),
+    id: uid("e") + i, user_id: (window.HL_VID?.() || S.uid), day: x.date || N.day, meal: x.meal || N.meal, name: String(x.name || "Food").slice(0, 160), serving: String(x.serving || "").slice(0, 120),
     kcal: r0(x.kcal), protein_g: r1(x.p), carbs_g: r1(x.c), fat_g: r1(x.f), sodium_mg: x.na == null || x.na === "" ? null : r0(x.na),
     barcode: x.barcode || null, supplement_id: x.suppId || null, units: x.units == null ? null : +x.units, micros: x.micros?.length ? x.micros : null,
     source: x.src || "manual", created_at: new Date(now + i).toISOString() }));
@@ -385,7 +385,7 @@ async function removeEntry(id){
 }
 async function addWater(delta){
   if (!requireLogin()) return;
-  const row = { id: uid("w"), user_id: S.uid, day: N.day, ml: delta };
+  const row = { id: uid("w"), user_id: (window.HL_VID?.() || S.uid), day: N.day, ml: delta };
   N.water.push({ id: row.id, date: row.day, ml: delta }); NU.render();
   const { error } = await sb().from("water_log").insert(row);
   if (error) { N.water = N.water.filter(x => x.id !== row.id); NU.render(); toast("Water didn't save: " + error.message); }
@@ -393,13 +393,13 @@ async function addWater(delta){
 async function saveProduct(p){
   const { code, usedAt, ...doc } = p;
   N.products[code] = { ...p };
-  const { error } = await sb().from("food_products").upsert({ user_id: S.uid, code, doc, used_at: usedAt || null, updated_at: new Date().toISOString() }, { onConflict: "user_id,code" });
+  const { error } = await sb().from("food_products").upsert({ user_id: (window.HL_VID?.() || S.uid), code, doc, used_at: usedAt || null, updated_at: new Date().toISOString() }, { onConflict: "user_id,code" });
   if (error) toast("Product not saved: " + error.message);
 }
 async function saveSupp(sp){
   const id = sp.id || uid("s"); const { id: _i, ...doc } = sp; const n = suppNorm(sp);
   doc.perDose = n.dose; doc.micros = n.doseMicros; doc.doseLabel = uLabel(n.takeQty, n.unit);
-  const { error } = await sb().from("supplements").upsert({ id, user_id: S.uid, doc, active: sp.active !== false, updated_at: new Date().toISOString() });
+  const { error } = await sb().from("supplements").upsert({ id, user_id: (window.HL_VID?.() || S.uid), doc, active: sp.active !== false, updated_at: new Date().toISOString() });
   if (error) { toast("Couldn't save: " + error.message); throw error; }
   N.supps[id] = { ...doc, id, active: sp.active !== false }; NU.render(); return N.supps[id];
 }
@@ -410,7 +410,7 @@ async function deleteSupp(id){
 }
 async function savePlan(p){
   N.plan = { ...N.plan, ...p };
-  const { error } = await sb().from("nutrition_plan").upsert({ user_id: S.uid, plan: N.plan, updated_at: new Date().toISOString() });
+  const { error } = await sb().from("nutrition_plan").upsert({ user_id: (window.HL_VID?.() || S.uid), plan: N.plan, updated_at: new Date().toISOString() });
   if (error) { toast("Plan not saved: " + error.message); throw error; }
   N.planSaved = true; NU.render();
 }
@@ -663,7 +663,7 @@ async function backfillMyFoods(){
   const rows = Object.entries(latest).map(([code, { e, n }]) => {
     const doc = { name: String(e.name).trim().slice(0, 120), servDesc: e.serving || "1 serving", kcal: r0(e.kcal), p: r1(e.p), c: r1(e.c), f: r1(e.f), na: e.na == null ? null : r0(e.na), micros: e.micros || [], mine: 1, uses: n, from: e.src || "manual" };
     N.products[code] = { ...doc, code, usedAt: e.at || null };
-    return { user_id: S.uid, code, doc, used_at: e.at || null, updated_at: new Date().toISOString() };
+    return { user_id: (window.HL_VID?.() || S.uid), code, doc, used_at: e.at || null, updated_at: new Date().toISOString() };
   });
   for (let i = 0; i < rows.length; i += 200) { const { error } = await sb().from("food_products").upsert(rows.slice(i, i + 200), { onConflict: "user_id,code" }); if (error) { console.warn("My foods backfill:", error.message); break; } }
 }

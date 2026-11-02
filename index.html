@@ -1454,8 +1454,8 @@ window.HL_VID = VID; window.HL_VIEWING = VIEWING;
 function guardWrites(sb){
   const ro = () => { const r = { data: null, error: { message: `You're viewing ${S.vname || "someone else"}'s dashboard, which is read-only here. Switch back to yours to make changes.` } };
     const p = new Proxy(function(){}, { get: (_, k) => k === "then" ? (a, b) => Promise.resolve(r).then(a, b) : () => p, apply: () => p }); return p; };
-  // "reports only" family members: you may manage their reports and profile (the database allows exactly this)
-  const ok = t => !VIEWING() || t === "marker_info" || (S.vmode === "reports" && ["reports", "user_profile"].includes(t));
+  // "managed by me" family members (mode "reports"): you may log food, medicines, readings and reports for them
+  const ok = t => !VIEWING() || t === "marker_info" || (S.vmode === "reports" && ["reports", "user_profile", "food_entries", "water_log", "food_products", "supplements", "nutrition_plan", "medications", "med_log", "health_daily"].includes(t));
   const wrap = (b, t) => { if (!ok(t)) for (const m of ["insert", "upsert", "update", "delete", "upload", "remove", "move", "copy"]) if (typeof b[m] === "function") b[m] = ro; return b; };
   const f = sb.from.bind(sb); sb.from = t => wrap(f(t), t);
   const sf = sb.storage.from.bind(sb.storage); sb.storage.from = t => wrap(sf(t), t);
@@ -1510,7 +1510,7 @@ async function mergeActivity(days){
   const map = { s: "steps", k: "active_kcal", h: "resting_hr", hrv: "hrv_ms", w: "weight_kg", sl: "sleep_h", bps: "bp_sys", bpd: "bp_dia", bpat: "bp_at", o2: "spo2", hra: "hr_avg", hrmin: "hr_min", hrmax: "hr_max", rr: "resp_rate" };
   const groups = {};
   for (const [d, v] of Object.entries(days)) {
-    const row = { user_id: S.uid, day: d, source: v.src || "manual", updated_at: new Date().toISOString() };
+    const row = { user_id: VID(), day: d, source: v.src || "manual", updated_at: new Date().toISOString() };
     for (const [a, b] of Object.entries(map)) if (v[a] != null) row[b] = v[a];
     const sig = Object.keys(row).sort().join(",");
     (groups[sig] ||= []).push(row);
@@ -3166,8 +3166,8 @@ renderAll();
 })();
 </script>
 <script src="foods.js?v=20261022b"></script>
-<script src="people.js?v=20261102b"></script>
-<script src="family.js?v=20261102b"></script>
-<script src="nutrition.js?v=20261102a"></script>
+<script src="people.js?v=20261102c"></script>
+<script src="family.js?v=20261102c"></script>
+<script src="nutrition.js?v=20261102c"></script>
 </body>
 </html>
